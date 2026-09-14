@@ -128,12 +128,15 @@ Kafka payloads are published with a versioned `EventEnvelope` containing event I
 
 ## Known Gaps
 
-- No application UI exists yet.
-- No mock financial provider exists yet.
-- No ledger, anomaly, or outbox query APIs exist yet.
-- Outbox processing has no claim/lease or idempotency mechanism.
-- Kafka producer and consumer trace propagation is incomplete.
-- Grafana Tempo and Loki datasources/configuration require completion.
-- Full Docker/Testcontainers and Kind runtime evidence is pending.
+- No mock financial provider exists yet (planned as optional Flask mock dependency in Stage 5).
+- Outbox processing has no claim/lease or idempotency mechanism (in progress in Stage 2).
+- Grafana Tempo and Loki datasources/configuration require full runtime validation.
+- Full local Kind runtime deployment evidence is pending.
 
-These gaps are tracked in [rebuild_guide.md](rebuild_guide.md) and [Verdict.md](Verdict.md).
+Implemented in current baseline:
+- Lightweight WebFlux control room UI served at `/`.
+- Authenticated Ledger and Outbox read/status APIs (`/api/v1/ledger`, `/api/v1/ledger/latest-hash`, `/api/v1/outbox/status`).
+- W3C `traceparent` propagation from outbox into Kafka headers and anomaly alert routing.
+- `X-Correlation-Id` response header filter and active span `X-Trace-Id` exposure.
+
+These items align with [codebase-analysis-refactoring-steps.md](codebase-analysis-refactoring-steps.md) and [Verdict.md](Verdict.md).

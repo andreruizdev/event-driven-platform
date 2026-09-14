@@ -35,7 +35,7 @@ public class DatabaseConfig {
     @Value("${eventdrivenmicroservices.database.local.username:eventdrivenmicroservices_admin}")
     private String localUsername;
 
-    @Value("${eventdrivenmicroservices.database.local.password}")
+    @Value("${eventdrivenmicroservices.database.local.password:local-dev-password}")
     private String localPassword;
 
     @Value("${eventdrivenmicroservices.database.local.driver-class-name:org.postgresql.Driver}")
@@ -47,7 +47,7 @@ public class DatabaseConfig {
     @Value("${eventdrivenmicroservices.database.remote.username:eventdrivenmicroservices_admin}")
     private String remoteUsername;
 
-    @Value("${eventdrivenmicroservices.database.remote.password}")
+    @Value("${eventdrivenmicroservices.database.remote.password:}")
     private String remotePassword;
 
     @Bean

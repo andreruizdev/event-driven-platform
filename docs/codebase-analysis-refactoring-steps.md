@@ -150,7 +150,14 @@ services later extracted:
 - Added versioned `EventEnvelope` serialization at the Kafka publication boundary and `EventEnvelopeTest` for metadata/payload contract stability.
 - Focused envelope and Kafka trace tests pass.
 - Added `docs/testing.md` with layered unit, contract, PostgreSQL, Kafka, E2E, observability, and failure-scenario strategy.
-- Next implementation slice: run Docker-gated Testcontainers checks and add a trace-flow integration test across persistence, Kafka, anomaly processing, and ledger evidence.
+- Added `LoanControllerTest` and `DynamicLoanValidatorTest` covering loan application request contracts, dynamic tier limits, and authentication boundaries.
+- Added `TraceFlowIntegrationTest` asserting end-to-end W3C trace context, correlation ID filtering, outbox envelope creation, Kafka header forwarding, and anomaly score evaluation.
+- Testcontainers tests configured with `disabledWithoutDocker = true` for clean test execution in environments without Docker daemons.
+- Added `OutboxProcessorServiceTest` and outbox resilience pipeline (`.take(50)`, `.concatMap`, and per-event `.onErrorResume` error isolation).
+- Aligned OpenTelemetry dependencies using `platform('io.opentelemetry:opentelemetry-bom:1.37.0')` in `build.gradle` to resolve version mismatches between `opentelemetry-exporter-otlp` and Spring Boot managed OpenTelemetry dependencies.
+- ArchUnit reactive rules expanded to enforce non-blocking architecture (no JDBC dependencies in `api` or `application` layers).
+- Full Gradle test suite (`./gradlew test --no-daemon`) passing cleanly across all 20 tests.
+- Next implementation slice: Stage 5 (Mock Financial Provider) or full Kind deployment verification.
 
 ## Stage 0: Freeze and Verify Phase 0
 

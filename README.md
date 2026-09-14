@@ -68,27 +68,42 @@ flowchart TD
 
 ---
 
-## 🚀 Quick Start (Local Kubernetes Deployment)
+## 🚀 Quick Start & Centralized Harness
 
 ### Prerequisites
-- Docker or Podman
-- Helm 3+
-- kubectl
-- Terraform / OpenTofu (for local `kind` cluster setup)
+- Java 21 & Gradle 8.4
+- Helm 3+ & kubectl
+- Kind & OpenTofu/Terraform
+- Docker or Podman (for local cluster execution)
 
-### Deployment Steps
+### Centralized Build & Boot Script
 
-1. **Run Local Orchestration Script**:
-   ```powershell
-   ./scripts/test-local.ps1
-   ```
-   *(On macOS/Linux, use `./scripts/test-local.sh`)*
+Run the single entry-point script to validate the toolchain, execute the Java unit/contract test suite, provision the local Kind cluster, and deploy all infrastructure dependencies and services via Helm:
 
-2. **Access Port Forwarded Observability Stack**:
+```bash
+./scripts/start-all.sh
+```
+
+*(On Windows PowerShell, use `./scripts/start-all.ps1`)*
+
+### Accessing & Testing the Platform
+
+1. **Port-Forward the Platform Control Room UI & REST API**:
    ```bash
-  kubectl port-forward svc/eventdrivenmicroservices-grafana 3000:3000
+   kubectl port-forward svc/event-driven-lab-platform-engine 8080:8080
    ```
-   Navigate to `http://localhost:3000` to inspect live application metrics, anomaly rate histograms, trace latency histograms, and ingestion rates.
+   Navigate to `http://localhost:8080/` in your browser. Log in with `admin` / `local-dev-password` to use the interactive loan, transaction, telemetry, outbox, and ledger control room.
+
+2. **Port-Forward the Grafana Observability Dashboard**:
+   ```bash
+   kubectl port-forward svc/eventdrivenmicroservices-grafana 3000:3000
+   ```
+   Navigate to `http://localhost:3000` to inspect live application metrics, anomaly rate histograms, and trace exemplars.
+
+3. **Execute the Automated Five-Minute Demo**:
+   ```bash
+   ./scripts/demo.sh
+   ```
 
 ---
 

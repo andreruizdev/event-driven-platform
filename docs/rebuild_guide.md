@@ -42,7 +42,19 @@ helm lint deploy/helm/event-driven-lab
 helm template event-driven-lab deploy/helm/event-driven-lab
 ```
 
-For a full local runtime check, provide Docker or Podman, Kind, kubectl, Helm, and Terraform, then run `scripts/test-local.ps1` or `scripts/test-local.sh`.
+For a full local runtime check, run the centralized harness:
+
+```bash
+./scripts/start-all.sh
+```
+
+Or on Windows:
+
+```powershell
+./scripts/start-all.ps1
+```
+
+This verifies Java 21, Helm, kubectl, Kind, and Terraform, runs compilation and tests, builds the container image, provisions the Kind cluster, creates secrets, and installs the Helm chart.
 
 ## Implementation Sequence
 

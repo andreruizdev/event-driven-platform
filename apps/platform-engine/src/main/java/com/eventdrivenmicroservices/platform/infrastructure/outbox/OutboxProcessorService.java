@@ -31,12 +31,17 @@ public class OutboxProcessorService {
     @Scheduled(fixedDelay = 5000)
     public void processOutboxEvents() {
         outboxEventRepository.findByProcessedFalse()
-                .flatMap(this::publishEvent)
-                .flatMap(this::markAsProcessed)
-                .subscribe(
-                        event -> log.debug("Successfully processed outbox event: {}", event.getId()),
-                        error -> log.error("Error processing outbox events", error)
-                );
+                .take(50)
+                .concatMap(event ->
+                        publishEvent(event)
+                                .flatMap(this::markAsProcessed)
+                                .doOnSuccess(ev -> log.debug("Successfully processed outbox event: {}", ev.getId()))
+                                .onErrorResume(error -> {
+                                    log.error("Failed to process outbox event: {}", event.getId(), error);
+                                    return Mono.empty();
+                                })
+                )
+                .subscribe();
     }
 
     private Mono<OutboxEvent> publishEvent(OutboxEvent event) {

@@ -16,4 +16,11 @@ public class ArchitectureTest {
         noClasses().that().resideInAPackage("com.eventdrivenmicroservices.platform..")
             .should().callMethod(Thread.class, "sleep", long.class)
             .because("We are a purely Reactive application (WebFlux). Thread.sleep violates non-blocking event loop processing.");
+
+    @ArchTest
+    static final ArchRule no_blocking_jdbc_in_reactive_layers =
+        noClasses().that().resideInAPackage("..com.eventdrivenmicroservices.platform.api..")
+            .or().resideInAPackage("..com.eventdrivenmicroservices.platform.application..")
+            .should().dependOnClassesThat().resideInAPackage("java.sql..")
+            .because("API controllers and application services must use R2DBC / Reactive repositories rather than blocking JDBC.");
 }

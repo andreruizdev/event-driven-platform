@@ -38,9 +38,10 @@ dependencies {
 
 
     // OpenTelemetry
-    implementation 'io.opentelemetry:opentelemetry-api:1.37.0'
-    implementation 'io.opentelemetry:opentelemetry-context:1.37.0'
-    implementation 'io.opentelemetry:opentelemetry-exporter-otlp:1.37.0'
+    implementation platform('io.opentelemetry:opentelemetry-bom:1.37.0')
+    implementation 'io.opentelemetry:opentelemetry-api'
+    implementation 'io.opentelemetry:opentelemetry-context'
+    implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
     implementation 'io.micrometer:micrometer-tracing-bridge-otel'
     implementation 'io.micrometer:micrometer-registry-otlp'
     

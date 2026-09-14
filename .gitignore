@@ -27,6 +27,12 @@ desktop.ini
 *.sqlite
 *.db
 
+# Terraform / OpenTofu
+**/.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
 # 3. Build Artifacts (General & Java/Node)
 **/build/
 .gradle/

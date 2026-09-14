@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -e
 
 echo "========================================="
@@ -7,9 +7,15 @@ echo " Local End-to-End Test Harness"
 echo "========================================="
 
 # 1. Provision Infrastructure via Terraform (Local Environment)
-export KIND_EXPERIMENTAL_PROVIDER=podman
 echo -e "\n[1/5] Provisioning Kubernetes cluster via Terraform..."
-if ! kind get clusters | grep -q "eventdrivenmicroservices-cluster"; then
+if ! docker info >/dev/null 2>&1; then
+    echo "WARNING: Docker daemon is not running or accessible in the current context."
+    echo "Kind cluster provisioning and container builds require a running Docker daemon."
+    echo "To run unit & contract tests locally without Docker, use: cd apps/platform-engine && ./gradlew test"
+    exit 0
+fi
+
+if ! kind get clusters 2>/dev/null | grep -q "eventdrivenmicroservices-cluster"; then
     cd terraform/environments/local
     terraform init
     terraform apply -auto-approve
@@ -18,14 +24,13 @@ else
     echo "Kind cluster 'eventdrivenmicroservices-cluster' is already running."
 fi
 
-# 2. Build images locally using Podman
-echo -e "\n[2/5] Building platform-engine image via Podman..."
-podman build -t docker.io/event-driven-lab/platform-engine:latest apps/platform-engine
+# 2. Build images locally using Docker
+echo -e "\n[2/5] Building platform-engine image via Docker..."
+docker build -t docker.io/event-driven-lab/platform-engine:latest apps/platform-engine
 
 # 3. Load images into the Kind cluster
-echo -e "\n[3/5] Loading images into Kind cluster using archives..."
-podman save --format docker-archive -o platform-engine.tar docker.io/event-driven-lab/platform-engine:latest
-kind load image-archive platform-engine.tar
+echo -e "\n[3/5] Loading images into Kind cluster..."
+kind load docker-image docker.io/event-driven-lab/platform-engine:latest --name eventdrivenmicroservices-cluster
 
 # Clean up tarballs
 rm -f *.tar

@@ -3,6 +3,7 @@ package com.eventdrivenmicroservices.platform.anomaly;
 import com.eventdrivenmicroservices.platform.infrastructure.observability.AnomalyMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -41,7 +42,7 @@ public class StreamingAnomalyDetector {
 
     @Autowired
     public StreamingAnomalyDetector(AnomalyMetrics metrics,
-                                    @Autowired(required = false) ReactiveRedisTemplate<String, String> redisTemplate) {
+                                    @Autowired(required = false) @Qualifier("reactiveRedisTemplate") ReactiveRedisTemplate<String, String> redisTemplate) {
         this.metrics = metrics;
         this.redisTemplate = redisTemplate;
         if (redisTemplate != null) {

@@ -1,35 +1,36 @@
 package com.eventdrivenmicroservices.platform.api;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.eventdrivenmicroservices.platform.model.TelemetryPayload;
 import com.eventdrivenmicroservices.platform.application.TelemetryProcessingService;
+import com.eventdrivenmicroservices.platform.security.SecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.publisher.Mono;
+
 import java.time.OffsetDateTime;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(TelemetryController.class)
+@WebFluxTest(controllers = TelemetryController.class)
+@Import(SecurityConfig.class)
+@TestPropertySource(properties = "spring.security.user.password=test")
 public class TelemetryControllerTest {
 
     @Autowired
-    private MockMvc mockMvc;
+    private WebTestClient webTestClient;
 
     @MockBean
     private TelemetryProcessingService processingService;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
     @Test
-    public void testReceiveTelemetry_ReturnsAccepted() throws Exception {
+    public void testReceiveTelemetry_ReturnsAccepted() {
         TelemetryPayload payload = new TelemetryPayload(
                 "device-001",
                 OffsetDateTime.now(),
@@ -37,13 +38,16 @@ public class TelemetryControllerTest {
                 "{\"cpu_load\": 45.2, \"mem_usage\": 12.8}"
         );
 
-        String password = System.getenv().getOrDefault("SPRING_SECURITY_USER_PASSWORD", "local-dev-password");
+        Mockito.when(processingService.processPayloadAsync(any(TelemetryPayload.class)))
+                .thenReturn(Mono.empty());
 
-        mockMvc.perform(post("/api/v1/telemetry")
-                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic("admin", password))
+        webTestClient.post()
+                .uri("/api/v1/telemetry")
+                .headers(headers -> headers.setBasicAuth("admin", "test"))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(payload)))
-                .andExpect(status().isAccepted());
+                .bodyValue(payload)
+                .exchange()
+                .expectStatus().isAccepted();
 
         Mockito.verify(processingService, Mockito.times(1)).processPayloadAsync(any(TelemetryPayload.class));
     }

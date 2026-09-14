@@ -11,13 +11,13 @@ spring:
     enabled: true
     url: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_URL:jdbc:postgresql://localhost:5432/eventdrivenmicroservices_tx}
     user: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_USERNAME:eventdrivenmicroservices_admin}
-    password: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD}
+    password: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD:local-dev-password}
   main:
     allow-bean-definition-overriding: true
   security:
     user:
       name: ${SPRING_SECURITY_USER_NAME:admin}
-      password: ${SPRING_SECURITY_USER_PASSWORD:#{null}}
+      password: ${SPRING_SECURITY_USER_PASSWORD:local-dev-password}
       roles: ADMIN
 
 management:
@@ -46,7 +46,7 @@ eventdrivenmicroservices:
     local:
       url: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_URL:jdbc:postgresql://localhost:5432/eventdrivenmicroservices_tx}
       username: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_USERNAME:eventdrivenmicroservices_admin}
-      password: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD}
+      password: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD:local-dev-password}
       driver-class-name: org.postgresql.Driver
 
 app:

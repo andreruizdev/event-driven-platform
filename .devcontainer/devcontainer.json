@@ -1,6 +1,6 @@
 {
   "name": "EventDrivenMicroservices Dev",
-  "image": "mcr.microsoft.com/devcontainers/universal:2-linux",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "version": "latest",
@@ -11,31 +11,25 @@
       "version": "21",
       "jdkType": "temurin"
     },
-    "ghcr.io/devcontainers/features/python:1": {
-      "version": "3.11",
-      "installTools": true
-    },
-    "ghcr.io/devcontainers/features/rust:1": {
-      "version": "latest"
-    },
     "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
       "version": "latest",
       "helm": "latest",
-      "minikube": "latest"
+      "minikube": "none"
+    },
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "version": "latest"
     }
   },
+  "postCreateCommand": "command -v kind >/dev/null 2>&1 || (curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64 && chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind)",
   "customizations": {
     "vscode": {
       "extensions": [
         "vscjava.vscode-java-pack",
-        "ms-python.python",
-        "ms-python.vscode-pylance",
         "ms-azuretools.vscode-docker",
         "ms-kubernetes-tools.vscode-kubernetes-tools",
-        "rust-lang.rust-analyzer",
-        "tamasfe.even-better-toml"
+        "hashicorp.terraform"
       ]
     }
   },
-  "remoteUser": "codespace"
+  "remoteUser": "vscode"
 }

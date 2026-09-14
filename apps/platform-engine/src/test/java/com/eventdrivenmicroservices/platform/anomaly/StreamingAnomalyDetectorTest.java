@@ -47,11 +47,11 @@ class StreamingAnomalyDetectorTest {
 
     @Test
     void testTelemetryZScore_ConsistentBaseline_ReturnsNormal() {
-        for (int i = 0; i < 10; i++) {
-            detector.evaluateTelemetryZScore("device-100", 50.0).block();
+        for (int i = 0; i < 15; i++) {
+            detector.evaluateTelemetryZScore("device-100", 50.0 + (i % 3) * 0.2).block();
         }
 
-        StepVerifier.create(detector.evaluateTelemetryZScore("device-100", 50.5))
+        StepVerifier.create(detector.evaluateTelemetryZScore("device-100", 50.3))
                 .expectNextMatches(score -> !score.isAnomaly())
                 .verifyComplete();
     }

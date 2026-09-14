@@ -10,7 +10,7 @@ import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Mono;
 
@@ -22,6 +22,7 @@ import static org.mockito.ArgumentMatchers.eq;
 
 @WebFluxTest(controllers = TransactionController.class)
 @Import(SecurityConfig.class)
+@TestPropertySource(properties = "spring.security.user.password=test")
 public class TransactionControllerTest {
 
     @Autowired
@@ -41,14 +42,9 @@ public class TransactionControllerTest {
         Mockito.when(processingService.processTransactionAsync(any(FinancialTransactionPayload.class), eq("trace-123")))
                 .thenReturn(Mono.empty());
 
-        String password = System.getenv().getOrDefault("SPRING_SECURITY_USER_PASSWORD", "local-dev-password");
-
-        webTestClient
-                .mutateWith(SecurityMockServerConfigurers.mockAuthentication(
-                        new org.springframework.security.authentication.UsernamePasswordAuthenticationToken("admin", password)
-                ))
-                .post()
+        webTestClient.post()
                 .uri("/api/v1/transactions")
+                .headers(headers -> headers.setBasicAuth("admin", "test"))
                 .header("traceparent", "trace-123")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
