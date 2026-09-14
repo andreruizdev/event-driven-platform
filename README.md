@@ -8,6 +8,7 @@
 - [Refactoring steps](docs/codebase-analysis-refactoring-steps.md): ordered structural refactoring playbook.
 - [Master plan](docs/master_plan.md): portfolio and long-term learning roadmap.
 - [Testing strategy](docs/testing.md): test layers, commands, and runtime evidence.
+- [Codespaces handoff](docs/codespaces.md): resume this work in a GitHub Codespace.
 
 A hands-on engineering lab demonstrating event-driven distributed systems architecture, reactive streaming anomaly detection, PostgreSQL Transactional Outbox, Apache Kafka event streaming, and Kubernetes deployment.
 
