@@ -1,0 +1,20 @@
+{{- if .Values.platformEngine.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: platform-engine-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: platform-engine
+  minReplicas: {{ .Values.platformEngine.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.platformEngine.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.platformEngine.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

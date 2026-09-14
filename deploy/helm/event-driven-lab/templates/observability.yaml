@@ -1,0 +1,375 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eventdrivenmicroservices-prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+
+    scrape_configs:
+      - job_name: 'platform-engine'
+        metrics_path: '/actuator/prometheus'
+        static_configs:
+          - targets: ['platform-engine:8080']
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eventdrivenmicroservices-prometheus
+  labels:
+    app: eventdrivenmicroservices-prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eventdrivenmicroservices-prometheus
+  template:
+    metadata:
+      labels:
+        app: eventdrivenmicroservices-prometheus
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - containerPort: 9090
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/prometheus/prometheus.yml
+          subPath: prometheus.yml
+      volumes:
+      - name: config-volume
+        configMap:
+          name: eventdrivenmicroservices-prometheus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eventdrivenmicroservices-prometheus
+spec:
+  selector:
+    app: eventdrivenmicroservices-prometheus
+  ports:
+    - protocol: TCP
+      port: 9090
+      targetPort: 9090
+---
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://eventdrivenmicroservices-prometheus:9090
+        access: proxy
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-provider
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'Event-Driven-Lab'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-eventdrivenmicroservices
+data:
+  eventdrivenmicroservices.json: |
+    {
+      "title": "Event-Driven Microservices Lab Observability",
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Anomaly Detection Rate",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [
+            { "expr": "rate(eventdrivenmicroservices_anomalies_detected_total[1m])", "legendFormat": "Anomalies / sec" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Streaming Telemetry Z-Score",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            { "expr": "eventdrivenmicroservices_anomaly_latest_zscore", "legendFormat": "Latest Z-Score" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "HTTP Ingestion Throughput",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+          "targets": [
+            { "expr": "sum(rate(http_server_requests_seconds_count[1m])) by (uri, status)", "legendFormat": "{{"{{"}}uri{{"}}"}} ({{"{{"}}status{{"}}"}})" }
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eventdrivenmicroservices-grafana
+  labels:
+    app: eventdrivenmicroservices-grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eventdrivenmicroservices-grafana
+  template:
+    metadata:
+      labels:
+        app: eventdrivenmicroservices-grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: eventdrivenmicroservices-secrets
+              key: GF_SECURITY_ADMIN_PASSWORD
+        volumeMounts:
+        - name: grafana-datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: grafana-dashboards-provider
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: grafana-dashboard-eventdrivenmicroservices
+          mountPath: /var/lib/grafana/dashboards
+      volumes:
+      - name: grafana-datasources
+        configMap:
+          name: grafana-datasources
+      - name: grafana-dashboards-provider
+        configMap:
+          name: grafana-dashboards-provider
+      - name: grafana-dashboard-eventdrivenmicroservices
+        configMap:
+          name: grafana-dashboard-eventdrivenmicroservices
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eventdrivenmicroservices-grafana
+spec:
+  selector:
+    app: eventdrivenmicroservices-grafana
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eventdrivenmicroservices-otel-collector-config
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+
+    exporters:
+      debug:
+        verbosity: detailed
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: "event_driven_lab"
+      otlp/tempo:
+        endpoint: "eventdrivenmicroservices-tempo:4317"
+        tls:
+          insecure: true
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug, otlp/tempo]
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [debug, prometheus]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eventdrivenmicroservices-otel-collector
+  labels:
+    app: eventdrivenmicroservices-otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eventdrivenmicroservices-otel-collector
+  template:
+    metadata:
+      labels:
+        app: eventdrivenmicroservices-otel-collector
+    spec:
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        args: ["--config=/etc/otel-collector-config.yaml"]
+        ports:
+        - containerPort: 4317
+        - containerPort: 4318
+        - containerPort: 8889
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/otel-collector-config.yaml
+          subPath: otel-collector-config.yaml
+      volumes:
+      - name: config-volume
+        configMap:
+          name: eventdrivenmicroservices-otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eventdrivenmicroservices-otel-collector
+spec:
+  selector:
+    app: eventdrivenmicroservices-otel-collector
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: 4317
+      targetPort: 4317
+    - name: http
+      protocol: TCP
+      port: 4318
+      targetPort: 4318
+    - name: metrics
+      protocol: TCP
+      port: 8889
+      targetPort: 8889
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eventdrivenmicroservices-tempo
+  labels:
+    app: eventdrivenmicroservices-tempo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eventdrivenmicroservices-tempo
+  template:
+    metadata:
+      labels:
+        app: eventdrivenmicroservices-tempo
+    spec:
+      containers:
+      - name: tempo
+        image: grafana/tempo:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        args: ["-config.file=/etc/tempo.yaml"]
+        ports:
+        - containerPort: 3200
+        - containerPort: 4317
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eventdrivenmicroservices-tempo
+spec:
+  selector:
+    app: eventdrivenmicroservices-tempo
+  ports:
+    - name: otlp-grpc
+      protocol: TCP
+      port: 4317
+      targetPort: 4317
+    - name: tempo-http
+      protocol: TCP
+      port: 3200
+      targetPort: 3200
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eventdrivenmicroservices-loki
+  labels:
+    app: eventdrivenmicroservices-loki
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eventdrivenmicroservices-loki
+  template:
+    metadata:
+      labels:
+        app: eventdrivenmicroservices-loki
+    spec:
+      containers:
+      - name: loki
+        image: grafana/loki:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - containerPort: 3100
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eventdrivenmicroservices-loki
+spec:
+  selector:
+    app: eventdrivenmicroservices-loki
+  ports:
+    - protocol: TCP
+      port: 3100
+      targetPort: 3100

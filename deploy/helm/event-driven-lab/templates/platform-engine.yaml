@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-engine
+  labels:
+    app: platform-engine
+spec:
+  replicas: {{ .Values.platformEngine.replicaCount }}
+  selector:
+    matchLabels:
+      app: platform-engine
+  template:
+    metadata:
+      labels:
+        app: platform-engine
+    spec:
+      volumes:
+      - name: tmp-volume
+        emptyDir: {}
+      initContainers:
+      - name: wait-for-dependencies
+        image: busybox:1.36
+        command: ['sh', '-c', 'until nc -z eventdrivenmicroservices-postgres 5432 && nc -z eventdrivenmicroservices-kafka 9092; do echo "Waiting for PostgreSQL and Kafka..."; sleep 3; done;']
+      containers:
+      - name: platform-engine
+        image: "{{ .Values.platformEngine.image.repository }}:{{ .Values.platformEngine.image.tag }}"
+        imagePullPolicy: {{ .Values.platformEngine.image.pullPolicy }}
+        resources:
+          {{- toYaml .Values.platformEngine.resources | nindent 10 }}
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        ports:
+        - containerPort: 8080
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "k8s"
+        - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+          value: "eventdrivenmicroservices-kafka:9092"
+        - name: SPRING_DATA_REDIS_HOST
+          value: "eventdrivenmicroservices-redis"
+        - name: SPRING_DATA_REDIS_PORT
+          value: "6379"
+        - name: EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_URL
+          value: "jdbc:postgresql://eventdrivenmicroservices-postgres:5432/eventdrivenmicroservices_db"
+        - name: SPRING_FLYWAY_URL
+          value: "jdbc:postgresql://eventdrivenmicroservices-postgres:5432/eventdrivenmicroservices_db"
+        - name: EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_USERNAME
+          value: "postgres"
+        - name: SPRING_FLYWAY_USER
+          value: "postgres"
+        - name: EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: eventdrivenmicroservices-secrets
+              key: POSTGRES_PASSWORD
+        - name: SPRING_FLYWAY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: eventdrivenmicroservices-secrets
+              key: POSTGRES_PASSWORD
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: eventdrivenmicroservices-secrets
+              key: JWT_SECRET_KEY
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8080
+          initialDelaySeconds: 20
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-engine
+spec:
+  selector:
+    app: platform-engine
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080

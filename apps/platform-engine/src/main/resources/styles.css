@@ -1,0 +1,53 @@
+:root {
+  color-scheme: dark;
+  --ink: #edf3f2;
+  --muted: #9baead;
+  --bg: #101817;
+  --panel: #182321;
+  --line: #2d403c;
+  --mint: #90e0c0;
+  --orange: #ffad70;
+  --red: #ff7b74;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-width: 320px;
+  background: radial-gradient(circle at 80% 0%, #254b43 0, transparent 34%), var(--bg);
+  color: var(--ink);
+  font-family: Georgia, 'Times New Roman', serif;
+}
+.shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 48px 0 32px; }
+.masthead { display: flex; justify-content: space-between; gap: 32px; align-items: end; border-bottom: 1px solid var(--line); padding-bottom: 34px; }
+.eyebrow { color: var(--mint); font: 700 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .08em; margin: 0 0 12px; }
+h1 { font-size: clamp(38px, 6vw, 76px); line-height: .94; letter-spacing: 0; max-width: 760px; margin: 0; font-weight: 500; }
+h2, h3 { margin: 0; font-weight: 500; }
+h2 { font-size: 24px; }
+h3 { color: var(--muted); font: 700 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 10px; }
+.lede { color: var(--muted); font-size: 18px; max-width: 650px; line-height: 1.45; margin: 20px 0 0; }
+.status { border: 1px solid var(--line); padding: 12px 16px; color: var(--orange); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
+.auth-panel, .panel { background: linear-gradient(145deg, rgba(34, 53, 48, .96), rgba(20, 31, 29, .96)); border: 1px solid var(--line); }
+.auth-panel { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 16px; align-items: end; padding: 20px; margin: 24px 0; }
+.trace-strip { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; border: 1px solid var(--line); padding: 13px 16px; margin: 0 0 24px; background: #0d1715; }
+.trace-strip .eyebrow { margin: 0 4px 0 0; }
+.trace-strip code { color: var(--orange); overflow-wrap: anywhere; font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; margin-right: 18px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.panel { padding: 24px; min-height: 300px; }
+.wide-panel { grid-column: 1 / -1; min-height: 360px; }
+.accent-panel { border-color: #876041; }
+.panel-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.panel-heading span { color: var(--orange); font: 700 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.panel-heading .small { margin-left: auto; }
+label { color: var(--muted); display: flex; flex-direction: column; gap: 7px; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; letter-spacing: .04em; }
+input { width: 100%; border: 1px solid var(--line); background: #0f1917; color: var(--ink); padding: 11px 12px; font: 15px Georgia, 'Times New Roman', serif; }
+input:focus { outline: 2px solid var(--mint); outline-offset: 2px; }
+.split, .evidence-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+.button { border: 0; background: var(--mint); color: #10221d; padding: 12px 17px; font: 700 12px ui-monospace, SFMono-Regular, Consolas, monospace; cursor: pointer; }
+.button:hover { background: #b5f2dc; }
+.button.secondary, .button.small { background: transparent; color: var(--mint); border: 1px solid var(--mint); }
+.button.small { padding: 7px 10px; margin-left: auto; }
+.result { background: #0c1413; border-left: 2px solid var(--mint); color: #cce9df; min-height: 62px; margin: 18px 0 0; padding: 12px; white-space: pre-wrap; overflow: auto; font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.ledger { max-height: 260px; border-left-color: var(--orange); }
+footer { color: var(--muted); border-top: 1px solid var(--line); margin-top: 28px; padding-top: 18px; font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+@media (max-width: 780px) { .masthead, .auth-panel { display: block; } .status { display: inline-block; margin-top: 22px; } .auth-panel > * { margin-bottom: 14px; } .grid { grid-template-columns: 1fr; } .wide-panel { grid-column: auto; } }

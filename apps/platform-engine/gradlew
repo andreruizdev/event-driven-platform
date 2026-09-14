@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VER="8.4"
+GRADLE_DIR="$DIR/.gradle/gradle-$VER"
+ZIP_URL="https://services.gradle.org/distributions/gradle-${VER}-bin.zip"
+if [ ! -x "$GRADLE_DIR/bin/gradle" ]; then
+  echo "Installing Gradle $VER to $GRADLE_DIR"
+  mkdir -p "$DIR/.gradle"
+  tmpfile=$(mktemp)
+  curl -fsSL "$ZIP_URL" -o "$tmpfile"
+  unzip -q "$tmpfile" -d "$DIR/.gradle"
+  rm -f "$tmpfile"
+fi
+exec "$GRADLE_DIR/bin/gradle" "$@"

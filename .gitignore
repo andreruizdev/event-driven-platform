@@ -1,0 +1,90 @@
+# ==========================================
+# EventDrivenMicroservices .GITIGNORE
+# ==========================================
+
+# 1. OS & IDE
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+.vscode/
+.vscode-test/
+.idea/
+.vs/
+*.suo
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+
+# 2. Logs & Databases
+*.log
+*.sqlite
+*.db
+
+# 3. Build Artifacts (General & Java/Node)
+**/build/
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+**/target/
+**/bin/
+**/obj/
+*.class
+*.jar
+*.war
+*.ear
+**/dist/
+node_modules/
+
+# 4. Python & ML Artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+pip-log.txt
+.pytest_cache/
+.mypy_cache/
+.tox/
+.coverage
+htmlcov/
+*.egg-info/
+*.model
+*.pt
+*.onnx
+
+# 5. Rust Artifacts
+**/*.rs.bk
+
+# 6. Secrets & Configs
+.env
+.env.*
+*.env.local
+.env.local
+*.pem
+*.key
+*.p12
+*.pfx
+kubeconfig
+
+# 7. Governance & Agent Logs
+# Block local agent logs and generated governance artifacts
+.agents/AGENT_LEDGER.md
+.agents/logs/
+
+# 8. Secure Architecture Reports
+# Deny all reports by default to prevent PII/Blueprint leakage
+docs/architecture-reports/*.md
+docs/architecture-reports/*.pdf
+# ALLOW explicitly encrypted/SOPS files
+!docs/architecture-reports/*.sops.md
+!docs/architecture-reports/.sops.yaml
+!docs/architecture-reports/README.md

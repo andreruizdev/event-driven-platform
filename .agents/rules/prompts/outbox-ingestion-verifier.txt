@@ -1,0 +1,1 @@
+Analyze the incoming transaction payload. Verify that the REST request is authenticated via Spring Security JWT, persisted atomically to PostgreSQL R2DBC alongside an outbox event, and appended to the SHA-256 cryptographic ledger. Assert that no blocking I/O calls occur during ingestion.

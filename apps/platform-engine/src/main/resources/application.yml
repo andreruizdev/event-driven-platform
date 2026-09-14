@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: platform-engine
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+  flyway:
+    enabled: true
+    url: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_URL:jdbc:postgresql://localhost:5432/eventdrivenmicroservices_tx}
+    user: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_USERNAME:eventdrivenmicroservices_admin}
+    password: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD}
+  main:
+    allow-bean-definition-overriding: true
+  security:
+    user:
+      name: ${SPRING_SECURITY_USER_NAME:admin}
+      password: ${SPRING_SECURITY_USER_PASSWORD:#{null}}
+      roles: ADMIN
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://eventdrivenmicroservices-otel-collector:4318}/v1/traces
+    metrics:
+      export:
+        url: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:http://eventdrivenmicroservices-otel-collector:4318}/v1/metrics
+        step: 10s
+
+eventdrivenmicroservices:
+  database:
+    mode: local
+    local:
+      url: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_URL:jdbc:postgresql://localhost:5432/eventdrivenmicroservices_tx}
+      username: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_USERNAME:eventdrivenmicroservices_admin}
+      password: ${EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD}
+      driver-class-name: org.postgresql.Driver
+
+app:
+  validation:
+    loan:
+      active-tier: MEDIUM
+      tiers:
+        LIGHT:
+          max-amount: 10000.00
+          max-term-months: 24
+        MEDIUM:
+          max-amount: 50000.00
+          max-term-months: 60
+        HIGH:
+          max-amount: 250000.00
+          max-term-months: 120
