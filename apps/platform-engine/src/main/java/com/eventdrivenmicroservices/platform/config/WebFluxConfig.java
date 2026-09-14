@@ -10,6 +10,7 @@ public class WebFluxConfig implements WebFluxConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         registry.addResourceHandler("/**")
-                .addResourceLocations("classpath:/static/", "classpath:/public/", "classpath:/");
+                .addResourceLocations("classpath:/static/", "classpath:/public/", "classpath:/")
+                .resourceChain(false);
     }
 }
