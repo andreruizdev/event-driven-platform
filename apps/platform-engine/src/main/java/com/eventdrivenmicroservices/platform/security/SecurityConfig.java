@@ -36,9 +36,9 @@ public class SecurityConfig {
             .addFilterAt(jwtBearerWebFilter(), SecurityWebFiltersOrder.AUTHENTICATION)
             .authorizeExchange(auth -> auth
                 .pathMatchers("/", "/index.html", "/app.js", "/styles.css").permitAll()
-                .pathMatchers("/actuator/health", "/actuator/health/**").permitAll() // Allow healthchecks without auth
+                .pathMatchers("/actuator/health", "/actuator/health/**", "/actuator/prometheus").permitAll() // Allow healthchecks & metrics scraping without auth
                 .pathMatchers("/api/v1/telemetry", "/api/v1/transactions/**", "/api/v1/loans/**").authenticated() // Require authentication for ingestion & loans
-                .pathMatchers("/actuator/**").hasRole("ADMIN") // Require ADMIN role for metrics management
+                .pathMatchers("/actuator/**").hasRole("ADMIN") // Require ADMIN role for management
                 .anyExchange().authenticated()
             )
             .httpBasic(Customizer.withDefaults()); // Basic authentication for edge nodes & operators
