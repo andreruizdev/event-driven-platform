@@ -42,7 +42,8 @@ class OutboxProcessorServiceTest {
         OutboxEvent event1 = createEvent("agg-1", "LoanApplication");
         OutboxEvent event2 = createEvent("agg-2", "FinancialTransaction");
 
-        when(repository.findByProcessedFalse()).thenReturn(Flux.just(event1, event2));
+        when(repository.findPendingForClaim(any(Instant.class), eq(50))).thenReturn(Flux.just(event1, event2));
+        when(repository.claimLock(any(UUID.class), anyString(), any(Instant.class), any(Instant.class))).thenReturn(Mono.just(1));
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(CompletableFuture.completedFuture(null));
         when(repository.save(any(OutboxEvent.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
 
@@ -65,7 +66,8 @@ class OutboxProcessorServiceTest {
         OutboxEvent failingEvent = createEvent("failing-agg", "LoanApplication");
         OutboxEvent successfulEvent = createEvent("success-agg", "FinancialTransaction");
 
-        when(repository.findByProcessedFalse()).thenReturn(Flux.just(failingEvent, successfulEvent));
+        when(repository.findPendingForClaim(any(Instant.class), eq(50))).thenReturn(Flux.just(failingEvent, successfulEvent));
+        when(repository.claimLock(any(UUID.class), anyString(), any(Instant.class), any(Instant.class))).thenReturn(Mono.just(1));
 
         CompletableFuture<org.springframework.kafka.support.SendResult<String, String>> failedFuture = new CompletableFuture<>();
         failedFuture.completeExceptionally(new RuntimeException("Kafka broker connection timeout"));
@@ -83,7 +85,20 @@ class OutboxProcessorServiceTest {
         processorService.processOutboxEvents();
 
         verify(repository, times(1)).save(argThat(e -> "success-agg".equals(e.getAggregateId()) && e.isProcessed()));
-        verify(repository, never()).save(argThat(e -> "failing-agg".equals(e.getAggregateId())));
+        verify(repository, times(1)).save(argThat(e -> "failing-agg".equals(e.getAggregateId()) && !e.isProcessed() && e.getRetryCount() == 1));
+    }
+
+    @Test
+    void processOutboxEvents_WhenClaimLockFails_SkipsPublishing() {
+        OutboxEvent alreadyClaimedEvent = createEvent("claimed-agg", "LoanApplication");
+
+        when(repository.findPendingForClaim(any(Instant.class), eq(50))).thenReturn(Flux.just(alreadyClaimedEvent));
+        when(repository.claimLock(any(UUID.class), anyString(), any(Instant.class), any(Instant.class))).thenReturn(Mono.just(0));
+
+        processorService.processOutboxEvents();
+
+        verify(kafkaTemplate, never()).send(any(ProducerRecord.class));
+        verify(repository, never()).save(any(OutboxEvent.class));
     }
 
     private OutboxEvent createEvent(String aggregateId, String aggregateType) {

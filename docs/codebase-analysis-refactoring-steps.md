@@ -80,13 +80,14 @@ flowchart TD
 * Deterministic demo script (`scripts/demo.sh`) exercising loan submission, transaction bursts, outbox queueing, and SHA-256 ledger verification.
 * **Exit Gate:** Single command `./scripts/demo.sh` produces demonstrable persistence, anomaly detection, and ledger chaining.
 
-### Stage 2: Outbox Leased Locking (Status: IN PROGRESS)
-* Introduce database-level row locking (`SELECT ... FOR UPDATE SKIP LOCKED`) on pending outbox polling to support horizontal scaling across multiple application replicas.
-* Track retry count and last error metadata on outbox records.
-* Verify Kafka unavailable failure injection and retry behavior.
+### Stage 2: Outbox Leased Locking (Status: COMPLETE)
+* Flyway migration `V3__Add_Outbox_Locking_And_Retries.sql` adds `locked_by`, `locked_until`, `retry_count`, and `last_error` columns and partial lease index.
+* `OutboxEventRepository` provides atomic lease locking (`claimLock`) and time-bounded polling (`findPendingForClaim`).
+* `OutboxProcessorService` acquires instance-leased locks (`LOCK_DURATION = 30s`) with sequential publishing (`.concatMap`), per-record error isolation, and failure backoff recording.
+* `OutboxProcessorServiceTest` asserts multi-worker lock isolation, Kafka failure isolation, and retry metadata recording.
 * **Exit Gate:** Outbox processing test proves multiple worker nodes claim non-overlapping event batches without duplicate publishing.
 
-### Stage 3: End-to-End Distributed Trace Verification (Status: SCHEDULED)
+### Stage 3: End-to-End Distributed Trace Verification (Status: NEXT UP)
 * Validate active OpenTelemetry span injection across all R2DBC queries, outbox dispatches, and Kafka consumer records.
 * Verify end-to-end trace waterfall visibility in Grafana Tempo linking HTTP ingress $\rightarrow$ PostgreSQL $\rightarrow$ Outbox $\rightarrow$ Kafka $\rightarrow$ Anomaly $\rightarrow$ Ledger.
 * **Exit Gate:** Querying a trace ID in Grafana Tempo displays the complete multi-hop causal chain.

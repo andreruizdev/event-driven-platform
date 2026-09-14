@@ -33,5 +33,17 @@ public class OutboxEvent {
     @Column("created_at")
     private Instant createdAt;
 
+    @Column("retry_count")
+    private int retryCount = 0;
+
+    @Column("last_error")
+    private String lastError;
+
+    @Column("locked_by")
+    private String lockedBy;
+
+    @Column("locked_until")
+    private Instant lockedUntil;
+
     // R2DBC doesn't support @PrePersist, handle in service layer
 }

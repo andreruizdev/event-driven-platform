@@ -97,7 +97,8 @@ class TraceFlowIntegrationTest {
         OutboxProcessorService outboxProcessor = new OutboxProcessorService(repo, kafkaTemplate, objectMapper);
 
         // 3. Trigger outbox publication
-        when(repo.findByProcessedFalse()).thenReturn(reactor.core.publisher.Flux.just(outboxEvent));
+        when(repo.findPendingForClaim(any(Instant.class), anyInt())).thenReturn(reactor.core.publisher.Flux.just(outboxEvent));
+        when(repo.claimLock(any(UUID.class), anyString(), any(Instant.class), any(Instant.class))).thenReturn(Mono.just(1));
         outboxProcessor.processOutboxEvents();
 
         // 4. Capture record published to Kafka by OutboxProcessor

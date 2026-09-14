@@ -10,7 +10,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.util.UUID;
 
 @Service
 @Slf4j
@@ -19,6 +21,9 @@ public class OutboxProcessorService {
     private final OutboxEventRepository outboxEventRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final String instanceId = "instance-" + UUID.randomUUID();
+
+    private static final Duration LOCK_DURATION = Duration.ofSeconds(30);
 
     public OutboxProcessorService(OutboxEventRepository outboxEventRepository,
                                   @Autowired(required = false) KafkaTemplate<String, String> kafkaTemplate,
@@ -30,18 +35,37 @@ public class OutboxProcessorService {
 
     @Scheduled(fixedDelay = 5000)
     public void processOutboxEvents() {
-        outboxEventRepository.findByProcessedFalse()
-                .take(50)
+        Instant now = Instant.now();
+        Instant lockUntil = now.plus(LOCK_DURATION);
+
+        outboxEventRepository.findPendingForClaim(now, 50)
                 .concatMap(event ->
-                        publishEvent(event)
-                                .flatMap(this::markAsProcessed)
-                                .doOnSuccess(ev -> log.debug("Successfully processed outbox event: {}", ev.getId()))
-                                .onErrorResume(error -> {
-                                    log.error("Failed to process outbox event: {}", event.getId(), error);
+                        outboxEventRepository.claimLock(event.getId(), instanceId, lockUntil, now)
+                                .flatMap(rowsUpdated -> {
+                                    if (rowsUpdated > 0) {
+                                        return publishEvent(event)
+                                                .flatMap(this::markAsProcessed)
+                                                .doOnSuccess(ev -> log.debug("Successfully processed outbox event: {}", ev.getId()))
+                                                .onErrorResume(error -> recordFailure(event, error));
+                                    }
+                                    log.debug("Event {} was claimed by another instance", event.getId());
                                     return Mono.empty();
                                 })
                 )
                 .subscribe();
+    }
+
+    private Mono<OutboxEvent> recordFailure(OutboxEvent event, Throwable error) {
+        log.error("Failed to process outbox event: {}", event.getId(), error);
+        event.setRetryCount(event.getRetryCount() + 1);
+        String errorMsg = error.getMessage();
+        if (errorMsg != null && errorMsg.length() > 500) {
+            errorMsg = errorMsg.substring(0, 500);
+        }
+        event.setLastError(errorMsg);
+        // Release lock so it can be retried after backoff
+        event.setLockedUntil(Instant.now());
+        return outboxEventRepository.save(event);
     }
 
     private Mono<OutboxEvent> publishEvent(OutboxEvent event) {
@@ -83,6 +107,7 @@ public class OutboxProcessorService {
     private Mono<OutboxEvent> markAsProcessed(OutboxEvent event) {
         event.setProcessed(true);
         event.setProcessedAt(Instant.now());
+        event.setLockedUntil(null);
         return outboxEventRepository.save(event);
     }
 }
