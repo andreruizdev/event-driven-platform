@@ -42,7 +42,7 @@ class DynamicLoanValidatorTest {
                 36
         );
 
-        assertDoesNotThrow(() -> validator.validate(request));
+        validator.validate(request);
     }
 
     @Test

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EventDrivenMicroservices Control Room</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">EVENTDRIVENMICROSERVICES / LIVE LAB</p>
+        <h1>Financial signal control room</h1>
+        <p class="lede">Submit a loan, simulate transaction velocity, and inspect the ledger and outbox evidence.</p>
+      </div>
+      <div class="status" id="healthStatus">Checking health...</div>
+    </header>
+
+    <section class="auth-panel" aria-labelledby="auth-title">
+      <div>
+        <p class="eyebrow">ACCESS</p>
+        <h2 id="auth-title">Operator credentials</h2>
+      </div>
+      <label>Username <input id="username" value="admin" autocomplete="username"></label>
+      <label>Password <input id="password" type="password" value="local-dev-password" autocomplete="current-password"></label>
+      <button id="saveCredentials" class="button secondary">Use credentials</button>
+    </section>
+
+    <section class="trace-strip">
+      <span class="eyebrow">CORRELATION</span>
+      <code id="correlationId">No request yet</code>
+      <span class="eyebrow">TRACE</span>
+      <code id="traceId">No trace header yet</code>
+    </section>
+
+    <section class="grid">
+      <article class="panel hero-panel">
+        <div class="panel-heading"><span>01</span><h2>Loan origination</h2></div>
+        <label>Applicant UUID <input id="applicantId" value="11111111-1111-4111-8111-111111111111"></label>
+        <div class="split">
+          <label>Amount <input id="loanAmount" type="number" value="25000"></label>
+          <label>Term months <input id="termMonths" type="number" value="36"></label>
+        </div>
+        <button id="submitLoan" class="button">Submit loan</button>
+        <pre id="loanResult" class="result">Waiting for a loan request.</pre>
+      </article>
+
+      <article class="panel accent-panel">
+        <div class="panel-heading"><span>02</span><h2>Velocity simulator</h2></div>
+        <p>Send six rapid transactions for one merchant to exercise the anomaly detector.</p>
+        <label>Merchant <input id="merchantId" value="demo-merchant-001"></label>
+        <div class="split">
+          <label>Amount <input id="transactionAmount" type="number" value="2000"></label>
+          <label>Count <input id="transactionCount" type="number" value="6"></label>
+        </div>
+        <button id="sendBurst" class="button">Send burst</button>
+        <pre id="transactionResult" class="result">No burst sent.</pre>
+      </article>
+
+      <article class="panel telemetry-panel">
+        <div class="panel-heading"><span>03</span><h2>Telemetry outlier</h2></div>
+        <p>Establish a steady device baseline, then inject a high CPU reading.</p>
+        <label>Device <input id="deviceId" value="demo-device-001"></label>
+        <div class="split">
+          <button id="sendBaseline" class="button secondary">Send baseline</button>
+          <button id="sendOutlier" class="button">Send outlier</button>
+        </div>
+        <pre id="telemetryResult" class="result">No telemetry sent.</pre>
+      </article>
+
+      <article class="panel wide-panel">
+        <div class="panel-heading"><span>04</span><h2>Event evidence</h2><button id="refreshEvidence" class="button small">Refresh</button></div>
+        <div class="evidence-grid">
+          <div><h3>Outbox status</h3><pre id="outboxResult" class="result">No data loaded.</pre></div>
+          <div><h3>Latest ledger hash</h3><pre id="hashResult" class="result">No data loaded.</pre></div>
+        </div>
+        <h3>Ledger events</h3>
+        <pre id="ledgerResult" class="result ledger">No data loaded.</pre>
+      </article>
+    </section>
+
+    <footer>Business workflow UI for the current modular monolith. Grafana remains the infrastructure observability surface.</footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

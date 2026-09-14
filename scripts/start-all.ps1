@@ -94,7 +94,7 @@ Write-Host "==========================================================" -Foregro
 Write-Host "1. Watch pod stabilization:"
 Write-Host "   kubectl get pods -w"
 Write-Host "2. Port-forward Platform Engine REST & Web UI:"
-Write-Host "   kubectl port-forward svc/event-driven-lab-platform-engine 8080:8080"
+Write-Host "   kubectl port-forward svc/platform-engine 8080:8080"
 Write-Host "3. Port-forward Grafana Observability Dashboard:"
 Write-Host "   kubectl port-forward svc/eventdrivenmicroservices-grafana 3000:3000"
 Write-Host "4. Execute five-minute workflow test:"

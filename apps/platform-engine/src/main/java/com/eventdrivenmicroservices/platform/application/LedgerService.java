@@ -29,7 +29,6 @@ public class LedgerService {
                     String currentHash = calculateSHA256(dataToHash);
                     
                     LedgerEvent event = LedgerEvent.builder()
-                            .id(UUID.randomUUID())
                             .transactionType(transactionType)
                             .payload(payload)
                             .previousHash(previousHash)

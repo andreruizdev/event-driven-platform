@@ -19,9 +19,6 @@ spec:
         image: postgres:15-alpine
         securityContext:
           allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
         env:
         - name: POSTGRES_USER
           value: postgres
@@ -68,6 +65,8 @@ spec:
         image: redis:7-alpine
         securityContext:
           allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 999
           capabilities:
             drop:
             - ALL

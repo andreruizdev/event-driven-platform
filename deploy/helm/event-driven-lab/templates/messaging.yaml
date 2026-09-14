@@ -198,15 +198,15 @@ spec:
           value: "1"
         - name: STATUS_STORAGE_REPLICATION_FACTOR
           value: "1"
-        # Explicitly configure Avro Converter
+        # Use standard Kafka JSON Converter
         - name: KEY_CONVERTER
-          value: "io.confluent.connect.avro.AvroConverter"
+          value: "org.apache.kafka.connect.json.JsonConverter"
         - name: VALUE_CONVERTER
-          value: "io.confluent.connect.avro.AvroConverter"
-        - name: CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL
-          value: "http://eventdrivenmicroservices-schema-registry:8081"
-        - name: CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL
-          value: "http://eventdrivenmicroservices-schema-registry:8081"
+          value: "org.apache.kafka.connect.json.JsonConverter"
+        - name: CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE
+          value: "false"
+        - name: CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE
+          value: "false"
         ports:
         - containerPort: 8083
 

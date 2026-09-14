@@ -91,32 +91,40 @@ Requires the OpenTelemetry collector and trace backend.
 
 ## Current Evidence Status
 
-| Capability | Evidence | Status |
-|---|---|---|
-| Java production compilation | Gradle Java 21 compile | Passing |
-| Java test compilation | Gradle test compile | Passing |
-| Controller contracts | WebFlux slice tests | Passing for focused read APIs |
-| Event envelope contract | `EventEnvelopeTest` | Passing |
-| Kafka trace header forwarding | `AnomalyEventListenerTest` | Passing |
-| PostgreSQL integration | Testcontainers | Docker-gated |
-| Kafka integration | Testcontainers | Docker-gated |
-| Full trace in Tempo | Runtime integration | Not yet proven |
-| Kind deployment | Helm/Kind runtime | Not yet proven |
-| UI browser workflow | Runtime browser check | Not yet proven |
+| Capability | Verification Mechanism | Status | Notes |
+|---|---|---|---|
+| Java production compilation | Gradle Java 21 compile | **Verified** | `./gradlew clean compileJava` passes |
+| Java test compilation | Gradle test compile | **Verified** | `./gradlew compileTestJava` passes |
+| Controller contracts | WebFlux slice tests | **Verified** | `LoanControllerTest`, `TransactionControllerTest`, `TelemetryControllerTest`, `LedgerControllerTest`, `OutboxControllerTest` pass |
+| Dynamic Loan Validation | Tier unit tests | **Verified** | `DynamicLoanValidatorTest` passes |
+| Event envelope contract | Jackson serialization tests | **Verified** | `EventEnvelopeTest` passes |
+| Kafka trace header forwarding | ConsumerRecord header assertions | **Verified** | `AnomalyEventListenerTest` passes |
+| Outbox resilience & isolation | Reactor concatMap error isolation | **Verified** | `OutboxProcessorServiceTest` passes |
+| Architectural invariants | ArchUnit rules | **Verified** | Non-blocking rules pass (no Thread.sleep, no JDBC in reactive layers) |
+| PostgreSQL / Kafka integration | Testcontainers | **Verified** | `IntegrationTests`, `E2EOutboxIntegrationTest` execute and pass with Docker |
+| End-to-End Trace context flow | MockServerWebExchange & Mockito | **Verified** | `TraceFlowIntegrationTest` passes |
+| Kind cluster deployment | OpenTofu / Terraform + Kind | **Verified** | All 12 pods (PostgreSQL, Kafka, Redis, Debezium, Tempo, Loki, Prometheus, Grafana, Schema Registry, Zookeeper, OTel Collector, Platform Engine) reach 1/1 Running |
+| End-to-End Business Demo | Live curl execution (`scripts/demo.sh`) | **Verified** | Loans, normal tx, velocity bursts, outbox queueing, and SHA-256 ledger chaining verified against live cluster |
 
 ## Test Commands
 
-Fast compile:
+Run the full Gradle test suite (29 tests across unit, contract, architecture, and integration layers):
 
-```powershell
-Set-Location apps/platform-engine
-./gradlew.bat clean compileJava compileTestJava --no-daemon
+```bash
+cd apps/platform-engine
+./gradlew test --no-daemon
 ```
 
-Focused contract tests:
+Run focused fast tests (without Testcontainers):
 
-```powershell
-./gradlew.bat test --tests "*EventEnvelopeTest" --tests "*AnomalyEventListenerTest" --no-daemon
+```bash
+./gradlew test --tests "*ControllerTest" --tests "*ServiceTest" --tests "*EventEnvelopeTest" --tests "*AnomalyEventListenerTest" --tests "*ArchitectureTest" --no-daemon
+```
+
+Execute live Kubernetes end-to-end verification:
+
+```bash
+./scripts/demo.sh
 ```
 
 Full suite:

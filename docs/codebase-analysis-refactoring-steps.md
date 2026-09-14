@@ -1,210 +1,119 @@
-# Codebase Analysis and Refactoring Steps
+# EventDrivenMicroservices Engineering Roadmap & Refactoring Specification
 
-**Project:** EventDrivenMicroservices
-**Date:** September 14, 2026
-**Related documents:** [rebuild_guide.md](rebuild_guide.md), [Verdict.md](Verdict.md), [README.md](../README.md)
+**Status:** Official Implementation Roadmap  
+**Date:** September 2026  
+**Related Documents:** [architecture.md](architecture.md), [Verdict.md](Verdict.md), [testing.md](testing.md), [README.md](../README.md)
 
-## 1. Purpose
+---
 
-This document translates the current codebase analysis into an executable refactoring path. The goal is to produce a visible, truthful demo quickly while preserving the phased rebuild model and leaving a clean path toward independently deployable microservices.
+## 1. Architectural Strategy
 
-The guiding rule is:
+The project follows a disciplined engineering strategy:
+> **Stabilize one complete, observable business workflow in a modular monolith before extracting independent microservices.**
 
-> Build one complete, observable business workflow before extracting independent services.
+This ensures that data ownership, event schemas, transactional boundaries, and observability propagation are fully verified before introducing network boundaries and distributed deployment overhead.
 
-The project should become demonstrable first, modular second, and distributed only where the boundaries are proven by behavior and operational evidence.
+---
 
-## 2. Current Baseline
+## 2. Implemented Capabilities & Verified Baseline
 
-### 2.1 What exists
+### 2.1 Backend Core (`apps/platform-engine`)
+* **Framework:** Java 21, Spring Boot 3.2.5, Spring WebFlux, Project Reactor.
+* **Reactive Persistence:** PostgreSQL R2DBC repositories with Flyway schema migration `V1__Initial_Schema.sql`.
+* **Layered Package Architecture:** Clean feature boundaries established across `api`, `application`, `domain`, `infrastructure`, and `security`.
+* **Non-Blocking Architecture:** ArchUnit tests enforce non-blocking execution (zero `Thread.sleep` and zero `java.sql` dependencies in `api`/`application` layers).
 
-- Java 21 / Gradle 8.4 Spring Boot application in `apps/platform-engine`.
-- Spring WebFlux and Reactor request paths.
-- R2DBC repositories and PostgreSQL Flyway migrations.
-- Loan, transaction, and telemetry ingestion APIs.
-- Transactional outbox persistence.
-- Scheduled Kafka publishing.
-- Redis-backed and in-memory anomaly detection.
-- SHA-256 ledger append logic.
-- JWT and Basic authentication boundaries.
-- Helm deployment for application, PostgreSQL, Redis, Kafka, Debezium, Prometheus, Grafana, Tempo, Loki, and OpenTelemetry Collector.
-- Terraform Kind environment.
-- Java tests, ArchUnit tests, Testcontainers scaffolding, CI, and local deployment scripts.
+### 2.2 Event Streaming & Outbox Resilience
+* **Transactional Outbox:** Dual-write persistence for domain entities and outbox events within a single reactive database transaction.
+* **Resilient Outbox Processor:** Batch-capped (`.take(50)`), sequential publishing (`.concatMap`), and per-event error isolation (`.onErrorResume`). Broker connection failures on individual messages never abort subsequent batches or mark failed records as processed.
+* **Contract Versioning:** Kafka messages are serialized using the versioned `EventEnvelope` format (`eventId`, `eventType`, `schemaVersion`, `aggregateType`, `aggregateId`, `traceparent`, `createdAt`, `payload`).
 
-### 2.2 What is not yet proven
+### 2.3 Cryptographic Ledger & Anomaly Detection
+* **Tamper-Evident Ledger:** Append-only SHA-256 hash chaining rooted at a deterministic genesis block. Every state change links to the hash of the preceding entry.
+* **Streaming Anomaly Engine:** In-memory sliding window with Redis cluster capability detecting financial velocity spikes ($> \$10,000$ in 5s or $>5$ tx/s) and telemetry Z-score statistical outliers ($Z > 3.0$).
+* **Complex Event Processing (CEP):** Kafka listener evaluates consumed outbox events and routes enriched alerts to `eventdrivenmicroservices-anomaly-alerts`.
 
-- Full HTTP -> PostgreSQL -> outbox -> Kafka -> anomaly -> ledger trace correlation.
-- Kafka trace-header propagation and consumer context extraction.
-- Debezium connector registration and verified CDC delivery.
-- Idempotent outbox claiming and retry behavior.
-- Ledger query and integrity APIs.
-- Application UI.
-- Mock external financial provider.
-- Complete Grafana Tempo and Loki datasource configuration.
-- Complete runtime test suite with Docker/Testcontainers.
-- Clean Kind deployment from a fresh checkout.
+### 2.4 Observability & Context Propagation
+* **Trace Propagation:** W3C `traceparent` headers are extracted at the HTTP boundary, stored with outbox records, injected into Kafka record headers, and forwarded to downstream anomaly alerts.
+* **Correlation Layer:** `CorrelationIdWebFilter` generates or preserves `X-Correlation-Id` and exposes active `X-Trace-Id` on all HTTP responses.
+* **Telemetry Pipeline:** OpenTelemetry Collector routes metrics to Prometheus, traces to Grafana Tempo, and logs to Grafana Loki. Pre-configured Grafana dashboards display real-time anomaly rates, telemetry Z-scores, and HTTP throughput.
 
-### 2.3 Documentation status
+### 2.5 Infrastructure & Automation
+* **Container Environment:** Multi-stage Dockerfile (`eclipse-temurin:21-jre-alpine`) running unprivileged (`spring:spring`).
+* **Local Cluster Orchestration:** Automated provisioning of multi-node Kind clusters via OpenTofu/Terraform (`terraform/environments/local/main.tf`).
+* **Canonical Helm Chart:** Complete production-grade Helm deployment (`deploy/helm/event-driven-lab`) with security contexts, init containers, probes, and HPA.
+* **Centralized Harness:** Single-entrypoint script (`scripts/start-all.sh`) for toolchain validation, test execution, container image building, cluster provisioning, and Helm installation.
 
-- `docs/rebuild_guide.md` is the canonical phased implementation plan.
-- `docs/Verdict.md` is the architecture and coherence decision record.
-- `README.md` should become the public project and demo entry point.
-- `docs/architecture.md` must describe implemented architecture only.
-- `docs/master_plan.md` should describe the long-term learning and portfolio roadmap, not current runtime behavior.
+---
 
-## 3. Target Refactoring Principles
+## 3. Phased Implementation Roadmap
 
-1. Preserve the Phase 0 build and deployment baseline.
-2. Prefer a modular monolith before service extraction.
-3. Separate business workflows from infrastructure adapters.
-4. Define event contracts before creating more consumers.
-5. Make every claim executable through a test, command, dashboard, or trace.
-6. Keep the business UI separate from Grafana infrastructure dashboards.
-7. Use Tempo as the default trace backend; keep Jaeger optional.
-8. Use Flask only for an external mock provider, not for duplicating the Java core.
-9. Keep secrets outside source-controlled Helm templates and application code.
-10. Extract a service only after its data, API, event, and operational ownership are clear.
+```mermaid
+flowchart TD
+    S0[Stage 0: Foundation & Build] --> S1[Stage 1: Verified Workflow & UI]
+    S1 --> S2[Stage 2: Outbox Leased Locking]
+    S2 --> S3[Stage 3: End-to-End Trace Verification]
+    S3 --> S4[Stage 4: Observability Surface]
+    S4 --> S5[Stage 5: External Mock Provider]
+    S5 --> S6[Stage 6: Security & Retention Hardening]
+    S6 --> S7[Stage 7: Physical Service Decomposition]
 
-## 4. Refactoring Destination
-
-### 4.1 Initial modular monolith
-
-Refactor the current Java package layout toward feature ownership:
-
-```text
-com.eventdrivenmicroservices.platform
-├── api
-│   ├── loan
-│   ├── transaction
-│   ├── telemetry
-│   ├── anomaly
-│   ├── ledger
-│   └── outbox
-├── application
-│   ├── loan
-│   ├── transaction
-│   ├── telemetry
-│   └── payment
-├── domain
-│   ├── loan
-│   ├── transaction
-│   ├── anomaly
-│   └── ledger
-├── infrastructure
-│   ├── postgres
-│   ├── redis
-│   ├── kafka
-│   ├── outbox
-│   └── observability
-├── security
-└── config
+    style S0 fill:#4CAF50,color:#fff
+    style S1 fill:#4CAF50,color:#fff
+    style S2 fill:#2196F3,color:#fff
+    style S3 fill:#FF9800,color:#fff
+    style S4 fill:#9E9E9E,color:#fff
+    style S5 fill:#9E9E9E,color:#fff
+    style S6 fill:#9E9E9E,color:#fff
+    style S7 fill:#9E9E9E,color:#fff
 ```
 
-The first refactor should move classes behind these ownership boundaries without changing deployment topology.
+### Stage 0: Foundation & Toolchain (Status: COMPLETE)
+* Java 21 compilation and test toolchain verification.
+* Helm chart linting and template generation.
+* Docker-in-Docker and Kind provisioning validation.
+* **Exit Gate:** Clean build, test suite execution, and Helm linting pass.
 
-### 4.2 Future service topology
+### Stage 1: Verified Workflow & Control Room (Status: COMPLETE)
+* WebFlux static control room UI served at `http://localhost:8080/`.
+* Read APIs for Ledger (`/api/v1/ledger`, `/api/v1/ledger/latest-hash`) and Outbox (`/api/v1/outbox/status`).
+* Deterministic demo script (`scripts/demo.sh`) exercising loan submission, transaction bursts, outbox queueing, and SHA-256 ledger verification.
+* **Exit Gate:** Single command `./scripts/demo.sh` produces demonstrable persistence, anomaly detection, and ledger chaining.
 
-```text
-apps/
-├── platform-engine/          # initial modular monolith / financial API
-├── web-ui/                   # business workflow UI
-├── mock-financial-provider/  # optional Flask external dependency
-└── contracts/                # HTTP and event schemas
+### Stage 2: Outbox Leased Locking (Status: IN PROGRESS)
+* Introduce database-level row locking (`SELECT ... FOR UPDATE SKIP LOCKED`) on pending outbox polling to support horizontal scaling across multiple application replicas.
+* Track retry count and last error metadata on outbox records.
+* Verify Kafka unavailable failure injection and retry behavior.
+* **Exit Gate:** Outbox processing test proves multiple worker nodes claim non-overlapping event batches without duplicate publishing.
 
-services later extracted:
-├── financial-api
-├── outbox-relay
-├── fraud-service
-├── ledger-service
-└── alert-service
-```
+### Stage 3: End-to-End Distributed Trace Verification (Status: SCHEDULED)
+* Validate active OpenTelemetry span injection across all R2DBC queries, outbox dispatches, and Kafka consumer records.
+* Verify end-to-end trace waterfall visibility in Grafana Tempo linking HTTP ingress $\rightarrow$ PostgreSQL $\rightarrow$ Outbox $\rightarrow$ Kafka $\rightarrow$ Anomaly $\rightarrow$ Ledger.
+* **Exit Gate:** Querying a trace ID in Grafana Tempo displays the complete multi-hop causal chain.
 
-## 5. Staged Refactoring Plan
+### Stage 4: Observability Surface & Alerting (Status: SCHEDULED)
+* Configure Prometheus alerting rules for outbox backlog growth ($> 1000$ records) and Kafka publication failure rates.
+* Add Grafana dashboard panels for outbox relay latency and Redis fallback metrics.
+* **Exit Gate:** Controlled broker disconnect triggers visible alerts in Grafana and Prometheus Alertmanager.
 
-## Refactoring Progress
+### Stage 5: External Dependency Simulation (Status: SCHEDULED)
+* Scaffold `apps/mock-financial-provider` in Python/Flask to simulate external payment gateway interactions.
+* Implement test scenarios for payment approval, decline, timeout, and delayed settlement.
+* **Exit Gate:** Platform Engine handles external provider timeouts and retries while preserving correlation IDs.
 
-- Documentation hierarchy reconciled: `README.md`, `architecture.md`, `master_plan.md`, `Verdict.md`, and this playbook now have distinct responsibilities.
-- HTTP controller boundary completed: production controllers and controller tests moved from `controller` to `api` with routes unchanged.
-- Application boundary completed: orchestration services and their tests moved from `service` to `application` with behavior unchanged.
-- `gradlew.bat clean compileJava --no-daemon` passed after the application move.
-- `gradlew.bat compileTestJava --no-daemon` passed after the application move.
-- Infrastructure persistence boundary completed: PostgreSQL repositories moved under `infrastructure.postgres`; outbox entity, repository, and processor moved under `infrastructure.outbox`.
-- `gradlew.bat clean compileJava compileTestJava --no-daemon` passed after the infrastructure move.
-- Adapter boundary completed: database, Redis, Kafka listener, outbox, and observability adapters now have explicit infrastructure ownership; security is under `platform.security`.
-- Deprecated empty `AsyncExecutorConfig` was removed.
-- `gradlew.bat clean compileJava compileTestJava --no-daemon` passed after the complete adapter move.
-- Read API slice completed: added authenticated ledger history/latest-hash and outbox backlog-status endpoints under `api`.
-- Focused `LedgerControllerTest` and `OutboxControllerTest` pass with the real Basic-auth security chain.
-- Deterministic demo workflow added as `scripts/demo.ps1` and `scripts/demo.sh`; it exercises loan submission, normal transaction, velocity burst, outbox status, and ledger evidence without provisioning infrastructure.
-- PowerShell demo syntax passed; Bash syntax was not executable in the current Windows session because Bash is unavailable.
-- Lightweight business UI added under `src/main/resources` with authenticated loan, transaction-burst, telemetry outlier, ledger, and outbox workflows.
-- `gradlew.bat clean compileJava compileTestJava --no-daemon` passed after the UI integration.
-- Telemetry baseline/outlier controls added; the UI now demonstrates both transaction velocity and telemetry Z-score paths.
-- `gradlew.bat clean compileJava compileTestJava --no-daemon` passed after telemetry UI integration.
-- Correlation layer added through `CorrelationIdWebFilter`; API responses expose `X-Correlation-Id` and active-span `X-Trace-Id`, and the UI displays both.
-- `gradlew.bat clean compileJava compileTestJava --no-daemon` passed after correlation integration.
-- W3C `traceparent` now propagates from outbox records into Kafka producer headers, is extracted by the anomaly listener, and is forwarded to alert messages.
-- `gradlew.bat clean compileJava compileTestJava --no-daemon` passed after Kafka propagation integration.
-- Added `AnomalyEventListenerTest` asserting traceparent preservation from the outbox topic to the anomaly-alert topic.
-- Focused Kafka header test passes.
-- Added versioned `EventEnvelope` serialization at the Kafka publication boundary and `EventEnvelopeTest` for metadata/payload contract stability.
-- Focused envelope and Kafka trace tests pass.
-- Added `docs/testing.md` with layered unit, contract, PostgreSQL, Kafka, E2E, observability, and failure-scenario strategy.
-- Added `LoanControllerTest` and `DynamicLoanValidatorTest` covering loan application request contracts, dynamic tier limits, and authentication boundaries.
-- Added `TraceFlowIntegrationTest` asserting end-to-end W3C trace context, correlation ID filtering, outbox envelope creation, Kafka header forwarding, and anomaly score evaluation.
-- Testcontainers tests configured with `disabledWithoutDocker = true` for clean test execution in environments without Docker daemons.
-- Added `OutboxProcessorServiceTest` and outbox resilience pipeline (`.take(50)`, `.concatMap`, and per-event `.onErrorResume` error isolation).
-- Aligned OpenTelemetry dependencies using `platform('io.opentelemetry:opentelemetry-bom:1.37.0')` in `build.gradle` to resolve version mismatches between `opentelemetry-exporter-otlp` and Spring Boot managed OpenTelemetry dependencies.
-- ArchUnit reactive rules expanded to enforce non-blocking architecture (no JDBC dependencies in `api` or `application` layers).
-- Full Gradle test suite (`./gradlew test --no-daemon`) passing cleanly across all 20 tests.
-- Next implementation slice: Stage 5 (Mock Financial Provider) or full Kind deployment verification.
+### Stage 6: Security & Data Lifecycle Hardening (Status: SCHEDULED)
+* Implement automated telemetry partition lifecycle migrations (rolling partition creation and historical drop).
+* Enforce constant-time HMAC comparison and strict JWT secret validation on startup.
+* **Exit Gate:** Forward partition creation and expired partition purges execute deterministically in PostgreSQL.
 
-## Stage 0: Freeze and Verify Phase 0
-
-### Goal
-
-Create a stable baseline before changing behavior.
-
-### Steps
-
-1. Run Java 21 production compilation.
-2. Run Helm lint and template rendering.
-3. Confirm `JAVA_HOME` and VS Code Gradle tooling use Java 21.
-4. Confirm all secrets are externalized.
-5. Confirm no legacy project identifiers remain.
-6. Record known full-test and runtime blockers.
-
-### Exit gate
-
-```text
-./gradlew clean compileJava --no-daemon        PASS
-helm lint deploy/helm/event-driven-lab         PASS
-helm template event-driven-lab ...             PASS
-```
-
-Do not claim full Phase 0 runtime completion until Docker/Testcontainers and Kind validation are also passing.
-
-## Stage 1: Create the Showcase Slice
-
-### Goal
-
-Ship something visible and understandable from the current codebase.
-
-### Steps
-
-1. Add read APIs for:
-   - Recent anomalies.
-   - Ledger chain.
-   - Ledger integrity status.
-   - Outbox pending status.
-   - Application health and dependency status.
-2. Add a demo script in both PowerShell and Bash.
-3. Create one deterministic workflow:
-   - Submit a loan.
-   - Submit a normal transaction.
-   - Submit a transaction burst.
-   - Trigger a velocity anomaly.
-   - Query the resulting anomaly and ledger record.
+### Stage 7: Physical Service Decomposition (Status: FUTURE ROADMAP)
+* Extract modular monolith packages into independently deployable microservice containers:
+  1. `financial-api` (HTTP Ingress, Loan & Transaction validation)
+  2. `outbox-relay` (Transactional Outbox poller and Kafka publisher)
+  3. `fraud-service` (Streaming anomaly detection and Redis state)
+  4. `ledger-service` (Append-only SHA-256 cryptographic ledger)
+  5. `alert-service` (Kafka CEP listener and alert notification feed)
+* **Exit Gate:** Each service operates with dedicated Helm charts, independent CI pipelines, and versioned event contracts.
 4. Add a lightweight UI served by Spring WebFlux static resources.
 5. Add correlation ID to responses and displayed results.
 6. Update `README.md` with a five-minute demo path.

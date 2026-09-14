@@ -75,6 +75,14 @@ data:
         url: http://eventdrivenmicroservices-prometheus:9090
         access: proxy
         isDefault: true
+      - name: Tempo
+        type: tempo
+        url: http://eventdrivenmicroservices-tempo:3200
+        access: proxy
+      - name: Loki
+        type: loki
+        url: http://eventdrivenmicroservices-loki:3100
+        access: proxy
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -289,6 +297,26 @@ spec:
       port: 8889
       targetPort: 8889
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-config
+data:
+  tempo.yaml: |
+    server:
+      http_listen_port: 3200
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /tmp/tempo/traces
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -317,6 +345,14 @@ spec:
         ports:
         - containerPort: 3200
         - containerPort: 4317
+        volumeMounts:
+        - name: tempo-config-vol
+          mountPath: /etc/tempo.yaml
+          subPath: tempo.yaml
+      volumes:
+      - name: tempo-config-vol
+        configMap:
+          name: tempo-config
 ---
 apiVersion: v1
 kind: Service

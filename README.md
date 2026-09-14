@@ -1,14 +1,12 @@
 # Event-Driven Microservices Lab
 
-## Project Navigation
+## Project Documentation
 
-- [Rebuild guide](docs/rebuild_guide.md): phased implementation plan.
-- [Architecture](docs/architecture.md): current system design and boundaries.
-- [Verdict](docs/Verdict.md): codebase analysis and architectural decisions.
-- [Refactoring steps](docs/codebase-analysis-refactoring-steps.md): ordered structural refactoring playbook.
-- [Master plan](docs/master_plan.md): portfolio and long-term learning roadmap.
-- [Testing strategy](docs/testing.md): test layers, commands, and runtime evidence.
-- [Codespaces handoff](docs/codespaces.md): resume this work in a GitHub Codespace.
+- **[System Architecture Specification](docs/architecture.md)**: Deep dive into service topology, non-blocking I/O, outbox dual-writes, and W3C trace propagation.
+- **[Engineering Roadmap & Refactoring](docs/codebase-analysis-refactoring-steps.md)**: Current capability matrix and phased implementation milestones.
+- **[Architecture Verdict & Decisions (ADRs)](docs/Verdict.md)**: Design rationale, consistency models, and modular monolith vs microservices analysis.
+- **[Testing Strategy & Quality Engineering](docs/testing.md)**: Multi-layer testing pyramid (ArchUnit, WebFlux slices, Testcontainers, and end-to-end workflows).
+- **[Developer & Codespaces Guide](docs/codespaces.md)**: Local developer setup, cloud container environment, and CLI reference.
 
 A hands-on engineering lab demonstrating event-driven distributed systems architecture, reactive streaming anomaly detection, PostgreSQL Transactional Outbox, Apache Kafka event streaming, and Kubernetes deployment.
 
@@ -90,7 +88,7 @@ Run the single entry-point script to validate the toolchain, execute the Java un
 
 1. **Port-Forward the Platform Control Room UI & REST API**:
    ```bash
-   kubectl port-forward svc/event-driven-lab-platform-engine 8080:8080
+   kubectl port-forward svc/platform-engine 8080:8080
    ```
    Navigate to `http://localhost:8080/` in your browser. Log in with `admin` / `local-dev-password` to use the interactive loan, transaction, telemetry, outbox, and ledger control room.
 

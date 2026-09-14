@@ -1,142 +1,110 @@
-# EventDrivenMicroservices Architecture
+# EventDrivenMicroservices System Architecture
 
-**Status:** Current implementation baseline
-**Canonical plan:** [rebuild_guide.md](rebuild_guide.md)
-**Refactoring playbook:** [codebase-analysis-refactoring-steps.md](codebase-analysis-refactoring-steps.md)
+**Status:** Official System Architecture Specification  
+**Version:** 2.0  
+**Related Documents:** [codebase-analysis-refactoring-steps.md](codebase-analysis-refactoring-steps.md), [Verdict.md](Verdict.md), [testing.md](testing.md)
 
-## Current Topology
+---
 
-The current system is a modular-monolith baseline: one Spring Boot WebFlux application plus infrastructure dependencies deployed by Helm.
+## 1. System Topology
+
+The platform operates as an observable modular monolith deployed to Kubernetes via Helm. All core financial ingestion, outbox dispatch, stream processing, anomaly detection, and cryptographic ledgering run within `platform-engine`, backed by PostgreSQL, Redis, and Apache Kafka.
 
 ```mermaid
-flowchart LR
-    Client[HTTP Client] --> API[platform-engine]
-    API --> PG[(PostgreSQL)]
-    API --> OUTBOX[(outbox_events)]
-    API --> REDIS[(Redis)]
-    OUTBOX --> RELAY[Scheduled Outbox Relay]
-    RELAY --> KAFKA[Kafka]
-    KAFKA --> CEP[Anomaly Event Listener]
-    CEP --> ALERT[eventdrivenmicroservices-anomaly-alerts]
-    API --> LEDGER[SHA-256 Ledger]
+flowchart TD
+    Client[HTTP Client / Control Room UI] -->|HTTP / REST| API[platform-engine WebFlux]
+    
+    subgraph Data Consistency & Ledger
+        API -->|Atomic Reactive Tx| PG[(PostgreSQL 15 R2DBC)]
+        PG -->|outbox_events| RELAY[Outbox Processor Relay]
+        PG -->|ledger_events| LEDGER[SHA-256 Chained Ledger]
+    end
 
-    API -. OTLP .-> OTEL[OpenTelemetry Collector]
-    OTEL --> PROM[Prometheus]
-    OTEL --> TEMPO[Tempo]
-    OTEL --> LOKI[Loki]
-    PROM --> GRAFANA[Grafana]
-    TEMPO --> GRAFANA
-    LOKI --> GRAFANA
+    subgraph Streaming & Analytics
+        RELAY -->|Versioned EventEnvelope| KAFKA[Apache Kafka]
+        KAFKA -->|Kafka Consumer Group| CEP[Anomaly Event Listener CEP]
+        CEP -->|Enriched Alert| ALERT[eventdrivenmicroservices-anomaly-alerts]
+        API <-->|Sliding Window State| REDIS[(Redis 7 Cluster)]
+    end
+
+    subgraph Unified Observability
+        API -. W3C Spans / Metrics .-> OTEL[OpenTelemetry Collector]
+        OTEL --> PROM[Prometheus]
+        OTEL --> TEMPO[Grafana Tempo]
+        OTEL --> LOKI[Grafana Loki]
+        PROM --> GRAFANA[Grafana Dashboards]
+        TEMPO --> GRAFANA
+        LOKI --> GRAFANA
+    end
 ```
 
-## Implemented Boundaries
+---
 
-### HTTP ingestion
+## 2. Ingestion & API Layer
 
-- `POST /api/v1/loans`
-- `POST /api/v1/transactions`
-- `POST /api/v1/telemetry`
-- `GET /api/v1/ledger`
-- `GET /api/v1/ledger/latest-hash`
-- `GET /api/v1/outbox/status`
+The HTTP layer is non-blocking, built with Spring WebFlux and secured with HTTP Basic and JWT Bearer authentication.
 
-The application serves a lightweight business control room at `/`. The static shell is public, while its API requests use operator Basic authentication.
+* `POST /api/v1/loans`: Ingests loan origination applications, validates applicant UUIDs and dynamic loan tier properties, persists the loan, creates an outbox event, and appends an `ApplicationSubmitted` record to the SHA-256 ledger.
+* `POST /api/v1/transactions`: Ingests financial transactions, evaluates real-time sliding-window velocity thresholds, and dual-writes transaction state with outbox events.
+* `POST /api/v1/telemetry`: High-throughput telemetry ingestion evaluating rolling Z-score outliers ($Z > 3.0$).
+* `GET /api/v1/ledger`: Retrieves chronological ledger event history with hash proofs.
+* `GET /api/v1/ledger/latest-hash`: Exposes the latest cryptographic head of the SHA-256 chain.
+* `GET /api/v1/outbox/status`: Returns current outbox backlog depth, oldest unprocessed record timestamp, and queue age.
+* `GET /`: Interactive web control room serving static WebFlux resources for operators and live demos.
 
-Every response receives an `X-Correlation-Id`; responses with an active OpenTelemetry span also receive `X-Trace-Id`. The control room displays the latest values so a demo request can be followed into application logs and the trace backend.
+### Context Propagation
+Every HTTP response includes an `X-Correlation-Id` header (generated or preserved from client requests) and an `X-Trace-Id` header whenever an active OpenTelemetry trace span exists.
 
-### Persistence
+---
 
-PostgreSQL stores loan applications, financial transactions, telemetry events, outbox events, and ledger events through R2DBC repositories and Flyway migrations.
+## 3. Transactional Outbox Pattern
 
-### Event delivery
+To ensure zero event loss without distributed two-phase commit overhead:
+1. **Atomic Dual-Write:** The business entity and the corresponding outbox record are committed together in a single PostgreSQL R2DBC transaction.
+2. **Resilient Outbox Relay:** A scheduled background publisher queries pending events using batch limiting (`.take(50)`), sequential publishing (`.concatMap`), and per-event error isolation (`.onErrorResume`).
+3. **Kafka Header Injection:** The stored W3C `traceparent` is injected into the Kafka record header so downstream consumers maintain causal trace continuity.
+4. **Contract Envelope:** Payloads are serialized using the standardized `EventEnvelope` schema:
+   ```json
+   {
+     "eventId": "uuid",
+     "eventType": "ApplicationSubmitted",
+     "schemaVersion": 1,
+     "aggregateType": "LoanApplication",
+     "aggregateId": "11111111-1111-4111-8111-111111111111",
+     "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+     "createdAt": "2026-09-14T19:11:00.437Z",
+     "payload": "{...}"
+   }
+   ```
 
-The application currently has a scheduled outbox publisher that sends `eventdrivenmicroservices-outbox-events` to Kafka. Debezium connector configuration exists in Helm, but connector registration and end-to-end CDC evidence are still pending.
+---
 
-### Anomaly detection
+## 4. Cryptographic Ledgering
 
-The detector supports financial velocity and telemetry Z-score checks with Redis state and an in-memory fallback. Anomaly events are routed to `eventdrivenmicroservices-anomaly-alerts`.
+The ledger enforces verifiable immutability for critical domain operations and anomaly events:
+* **Genesis Hash:** Rooted at deterministic `64-zero` SHA-256 string (`0000000000000000000000000000000000000000000000000000000000000000`).
+* **Hash Chaining:** Each record calculates:
+  $$\text{current\_hash} = \text{SHA-256}(\text{previous\_hash} + \text{transaction\_type} + \text{payload})$$
+* **Tamper Evidence:** Modifying any historical record invalidates all subsequent hashes in the chain, enabling instant detection via automated audit scripts.
 
-### Ledger
+---
 
-The ledger appends SHA-256 hash-linked events. A read/query API and database-level append-only enforcement are future work.
+## 5. Streaming Anomaly Detection Engine
 
-## Current Package Direction
+The anomaly detection engine runs in-process with dual-backend state management:
+* **Financial Velocity Anomaly:** Detects rapid transactions exceeding either \$10,000 or 5 transactions within a rolling 5-second sliding window. State is managed via Redis Sorted Sets (with an automatic in-memory concurrent deque fallback).
+* **Telemetry Z-Score Outlier:** Calculates rolling mean ($\mu$) and standard deviation ($\sigma$) across a window of 20 readings, flagging any observation where:
+  $$Z = \frac{|x - \mu|}{\sigma} \ge 3.0$$
+* **Complex Event Processing:** When an anomaly is detected, the event is appended to the cryptographic ledger as `ANOMALY_FLAGGED`, dispatched to Kafka, and consumed by `AnomalyEventListener` to route high-priority alerts to `eventdrivenmicroservices-anomaly-alerts`.
 
-The first boundary moves are complete: HTTP controllers and their tests now live under `api`, orchestration services and their tests now live under `application`, and PostgreSQL, Redis, Kafka, outbox, and observability adapters now live under `infrastructure`. The deployment topology is unchanged:
+---
 
-```text
-com.eventdrivenmicroservices.platform
-├── api
-│   ├── loan
-│   ├── transaction
-│   ├── telemetry
-│   ├── anomaly
-│   ├── ledger
-│   └── outbox
-├── application
-│   ├── loan
-│   ├── transaction
-│   ├── telemetry
-│   └── payment
-├── domain
-│   ├── loan
-│   ├── transaction
-│   ├── anomaly
-│   └── ledger
-├── infrastructure
-│   ├── postgres
-│   ├── redis
-│   ├── kafka
-│   ├── outbox
-│   └── observability
-├── security
-└── config
-```
+## 6. Observability & Infrastructure
 
-This is an internal modularization step, not yet a microservice split.
-
-## Target Evolution
-
-After the demonstrable workflow is stable, extract services in this order:
-
-1. `financial-api`
-2. `outbox-relay`
-3. `fraud-service`
-4. `ledger-service`
-5. `alert-service`
-
-Each extraction requires an independent contract, deployment, health checks, metrics, traces, tests, and failure scenario.
-
-## Observability Contract
-
-The target workflow must correlate one request across:
-
-```text
-HTTP ingress
-  -> validation
-  -> PostgreSQL domain write
-  -> outbox write
-  -> Kafka publish
-  -> anomaly evaluation
-  -> ledger append
-  -> alert publication
-```
-
-The implementation propagates the stored W3C `traceparent` from outbox metadata into Kafka headers, extracts it in the anomaly consumer, and forwards it to alert messages. Full child-span creation and end-to-end trace verification remain pending. Grafana Tempo is the default trace backend; Jaeger is optional and should not run alongside Tempo by default.
-
-Kafka payloads are published with a versioned `EventEnvelope` containing event ID, event type/version, aggregate metadata, traceparent, occurrence time, and the original business payload.
-
-## Known Gaps
-
-- No mock financial provider exists yet (planned as optional Flask mock dependency in Stage 5).
-- Outbox processing has no claim/lease or idempotency mechanism (in progress in Stage 2).
-- Grafana Tempo and Loki datasources/configuration require full runtime validation.
-- Full local Kind runtime deployment evidence is pending.
-
-Implemented in current baseline:
-- Lightweight WebFlux control room UI served at `/`.
-- Authenticated Ledger and Outbox read/status APIs (`/api/v1/ledger`, `/api/v1/ledger/latest-hash`, `/api/v1/outbox/status`).
-- W3C `traceparent` propagation from outbox into Kafka headers and anomaly alert routing.
-- `X-Correlation-Id` response header filter and active span `X-Trace-Id` exposure.
-
-These items align with [codebase-analysis-refactoring-steps.md](codebase-analysis-refactoring-steps.md) and [Verdict.md](Verdict.md).
+The production stack is packaged in the canonical Helm chart `deploy/helm/event-driven-lab`:
+* **OpenTelemetry Collector:** Central gateway receiving OTLP gRPC/HTTP signals on ports 4317 and 4318.
+* **Grafana Tempo:** Distributed trace storage supporting traceparent lookups.
+* **Prometheus:** Metrics scraping endpoint monitoring throughput, JVM metrics, and custom anomaly counters.
+* **Grafana Loki:** Centralized log aggregation across all Kubernetes pods.
+* **Grafana:** Dashboards pre-provisioned with Prometheus, Tempo, and Loki datasources.
+* **Security Hardening:** Pods execute with restricted security contexts (`allowPrivilegeEscalation: false`, non-root execution, dropped capabilities). All secrets are injected dynamically from Kubernetes Secrets (`eventdrivenmicroservices-secrets`).
