@@ -8,6 +8,7 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
+import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.core.context.SecurityContextImpl;
 import org.springframework.security.web.server.SecurityWebFilterChain;
@@ -32,7 +33,9 @@ public class SecurityConfig {
     @Bean
     public SecurityWebFilterChain filterChain(ServerHttpSecurity http) {
         http
-            .csrf(csrf -> csrf.disable()) // Disable CSRF for stateless REST APIs
+            .csrf(csrf -> csrf.ignoringRequestMatchers(
+                ServerWebExchangeMatchers.pathMatchers("/api/v1/telemetry", "/api/v1/transactions/**", "/api/v1/loans/**", "/actuator/**")
+            ))
             .addFilterAt(jwtBearerWebFilter(), SecurityWebFiltersOrder.AUTHENTICATION)
             .authorizeExchange(auth -> auth
                 .pathMatchers("/", "/index.html", "/app.js", "/styles.css").permitAll()
