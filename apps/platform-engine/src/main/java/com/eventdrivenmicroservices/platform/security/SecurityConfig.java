@@ -8,6 +8,9 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
+import org.springframework.security.web.server.csrf.CsrfWebFilter;
+import org.springframework.security.web.server.util.matcher.AndServerWebExchangeMatcher;
+import org.springframework.security.web.server.util.matcher.NegatedServerWebExchangeMatcher;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.core.context.SecurityContextImpl;
@@ -33,8 +36,13 @@ public class SecurityConfig {
     @Bean
     public SecurityWebFilterChain filterChain(ServerHttpSecurity http) {
         http
-            .csrf(csrf -> csrf.ignoringRequestMatchers(
-                ServerWebExchangeMatchers.pathMatchers("/api/v1/telemetry", "/api/v1/transactions/**", "/api/v1/loans/**", "/actuator/**")
+            .csrf(csrf -> csrf.requireCsrfProtectionMatcher(
+                new AndServerWebExchangeMatcher(
+                    CsrfWebFilter.DEFAULT_CSRF_MATCHER,
+                    new NegatedServerWebExchangeMatcher(
+                        ServerWebExchangeMatchers.pathMatchers("/api/v1/telemetry", "/api/v1/transactions/**", "/api/v1/loans/**", "/actuator/**")
+                    )
+                )
             ))
             .addFilterAt(jwtBearerWebFilter(), SecurityWebFiltersOrder.AUTHENTICATION)
             .authorizeExchange(auth -> auth
