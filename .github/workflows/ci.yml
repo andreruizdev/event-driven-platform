@@ -1,5 +1,8 @@
 name: Event-Driven Lab CI/CD
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
