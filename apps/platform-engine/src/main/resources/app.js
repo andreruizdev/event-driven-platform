@@ -1,11 +1,11 @@
 const state = {
   username: localStorage.getItem('eventdriven.username') || 'admin',
-  password: localStorage.getItem('eventdriven.password') || 'local-dev-password'
+  password: ''
 };
 
 const $ = (id) => document.getElementById(id);
 $('username').value = state.username;
-$('password').value = state.password;
+$('password').value = '';
 
 function authHeaders() {
   return {
@@ -62,7 +62,7 @@ $('saveCredentials').addEventListener('click', () => {
   state.username = $('username').value;
   state.password = $('password').value;
   localStorage.setItem('eventdriven.username', state.username);
-  localStorage.setItem('eventdriven.password', state.password);
+  localStorage.removeItem('eventdriven.password');
   refreshEvidence();
 });
 
