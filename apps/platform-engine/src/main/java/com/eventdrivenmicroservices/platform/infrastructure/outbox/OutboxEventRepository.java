@@ -27,6 +27,10 @@ public interface OutboxEventRepository extends ReactiveCrudRepository<OutboxEven
     Mono<Long> countByProcessedFalse();
 
     Mono<OutboxEvent> findFirstByProcessedFalseOrderByCreatedAtAsc();
+
+    @Modifying
+    @Query("UPDATE outbox_events SET processed = true, processed_at = :processedAt WHERE id = :id")
+    Mono<Integer> markAsProcessed(@Param("id") UUID id, @Param("processedAt") Instant processedAt);
     
     @Modifying
     @Query("DELETE FROM outbox_events WHERE processed = true AND created_at < :cutoffDate")

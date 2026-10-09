@@ -2,6 +2,7 @@ package com.eventdrivenmicroservices.platform.infrastructure.observability;
 
 import com.eventdrivenmicroservices.platform.anomaly.AnomalyScore;
 import com.eventdrivenmicroservices.platform.anomaly.StreamingAnomalyDetector;
+import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyAlertOutboxRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyEventListener;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.EventEnvelope;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEvent;
@@ -131,22 +132,20 @@ class TraceFlowIntegrationTest {
                 "eventdrivenmicroservices-outbox-events", 0, 0L, aggregateId, publishedRecord.value());
         consumerHeaders.forEach(h -> consumerRecord.headers().add(h));
 
-        @SuppressWarnings("unchecked")
-        KafkaTemplate<String, String> alertKafkaTemplate = mock(KafkaTemplate.class);
-        AnomalyEventListener listener = new AnomalyEventListener(alertKafkaTemplate);
+        AnomalyAlertOutboxRepository alertOutboxRepository = mock(AnomalyAlertOutboxRepository.class);
+        when(alertOutboxRepository.insertIfAbsent(any(UUID.class), any(String.class), any(String.class),
+            any(String.class), any(Instant.class))).thenReturn(Mono.just(1));
+        AnomalyEventListener listener = new AnomalyEventListener(objectMapper, alertOutboxRepository);
 
         listener.consumeOutboxEvent(consumerRecord);
 
-        // 7. Verify AnomalyEventListener forwards traceparent to anomaly-alerts topic
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<ProducerRecord<String, String>> alertCaptor = ArgumentCaptor.forClass(ProducerRecord.class);
-        verify(alertKafkaTemplate, times(1)).send(alertCaptor.capture());
-
-        ProducerRecord<String, String> alertRecord = alertCaptor.getValue();
-        assertEquals("eventdrivenmicroservices-anomaly-alerts", alertRecord.topic());
-        Header alertTraceHeader = alertRecord.headers().lastHeader("traceparent");
-        assertNotNull(alertTraceHeader, "Alert record must preserve traceparent header");
-        assertEquals(testTraceparent, new String(alertTraceHeader.value(), StandardCharsets.UTF_8));
+        ArgumentCaptor<String> alertEnvelopeCaptor = ArgumentCaptor.forClass(String.class);
+        verify(alertOutboxRepository).insertIfAbsent(
+            eq(envelope.eventId()), eq(aggregateId), alertEnvelopeCaptor.capture(),
+            eq(testTraceparent), any(Instant.class));
+        EventEnvelope queuedAlert = objectMapper.readValue(alertEnvelopeCaptor.getValue(), EventEnvelope.class);
+        assertEquals(testTraceparent, queuedAlert.traceparent());
+        assertEquals("ANOMALY_VELOCITY_SPIKE", queuedAlert.eventType());
     }
 
     @Test

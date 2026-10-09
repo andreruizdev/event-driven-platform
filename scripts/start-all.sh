@@ -76,10 +76,15 @@ if [ ! -f .env ]; then
   else
     cat <<EOF > .env
 EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD=local-dev-password
+DEBEZIUM_PASSWORD=local-dev-debezium-password
 SPRING_SECURITY_USER_PASSWORD=local-dev-password
 JWT_SECRET_KEY=local-dev-jwt-secret-key-32-bytes-long!
 EOF
   fi
+fi
+
+if ! grep -q '^DEBEZIUM_PASSWORD=' .env; then
+  printf '\nDEBEZIUM_PASSWORD=local-dev-debezium-password\n' >> .env
 fi
 
 kubectl delete secret eventdrivenmicroservices-secrets --ignore-not-found

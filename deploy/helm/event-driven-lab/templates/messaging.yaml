@@ -169,6 +169,10 @@ spec:
       labels:
         app: eventdrivenmicroservices-debezium
     spec:
+      automountServiceAccountToken: false
+      volumes:
+      - name: tmp-volume
+        emptyDir: {}
       initContainers:
       - name: wait-for-kafka
         image: confluentinc/cp-kafka:7.5.0
@@ -176,11 +180,24 @@ spec:
       containers:
       - name: debezium
         image: debezium/connect:2.5
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
         securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
           capabilities:
             drop:
             - ALL
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
         env:
         - name: BOOTSTRAP_SERVERS
           value: "eventdrivenmicroservices-kafka:9092"
@@ -207,10 +224,41 @@ spec:
           value: "false"
         - name: CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE
           value: "false"
+        - name: CONNECT_CONFIG_PROVIDERS
+          value: "env"
+        - name: CONNECT_CONFIG_PROVIDERS_ENV_CLASS
+          value: "org.apache.kafka.common.config.provider.EnvVarConfigProvider"
+        - name: DEBEZIUM_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: eventdrivenmicroservices-secrets
+              key: DEBEZIUM_PASSWORD
         ports:
         - containerPort: 8083
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8083
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8083
+          initialDelaySeconds: 60
+          periodSeconds: 20
 
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eventdrivenmicroservices-debezium
+spec:
+  selector:
+    app: eventdrivenmicroservices-debezium
+  ports:
+  - port: 8083
+    targetPort: 8083
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -219,18 +267,90 @@ metadata:
 data:
   postgres-outbox-connector.json: |
     {
-      "name": "eventdrivenmicroservices-postgres-outbox-connector",
-      "config": {
-        "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-        "tasks.max": "1",
-        "plugin.name": "pgoutput",
-        "database.hostname": "eventdrivenmicroservices-postgres",
-        "database.port": "5432",
-        "database.user": "postgres",
-        "database.password": "password",
-        "database.dbname": "eventdrivenmicroservices_db",
-        "database.server.name": "eventdrivenmicroservices_tx",
-        "table.include.list": "public.outbox_events",
-        "tombstones.on.delete": "false"
-      }
+      "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+      "tasks.max": "1",
+      "plugin.name": "pgoutput",
+      "database.hostname": "eventdrivenmicroservices-postgres",
+      "database.port": "5432",
+      "database.user": "debezium_replication",
+      "database.password": "${env:DEBEZIUM_PASSWORD}",
+      "database.dbname": "eventdrivenmicroservices_db",
+      "topic.prefix": "eventdrivenmicroservices_cdc",
+      "table.include.list": "public.outbox_events",
+      "column.include.list": "public.outbox_events.(id|aggregate_type|aggregate_id|event_type|payload|traceparent|created_at)",
+      "publication.name": "eventdrivenmicroservices_outbox_publication",
+      "publication.autocreate.mode": "disabled",
+      "slot.name": "eventdrivenmicroservices_outbox_slot",
+      "slot.drop.on.stop": "false",
+      "snapshot.mode": "never",
+      "topic.creation.default.replication.factor": "1",
+      "topic.creation.default.partitions": "1",
+      "topic.creation.default.cleanup.policy": "delete",
+      "topic.creation.default.retention.ms": "86400000",
+      "tombstones.on.delete": "false"
     }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: eventdrivenmicroservices-debezium-register-connector
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: register-connector
+        image: curlimages/curl:8.5.0
+        command: ["sh", "-ec"]
+        args:
+        - |
+          connect_url=http://eventdrivenmicroservices-debezium:8083
+          connector_url="$connect_url/connectors/eventdrivenmicroservices-postgres-outbox-connector/config"
+          until curl --fail --silent --show-error "$connect_url/" >/dev/null; do
+            sleep 3
+          done
+          curl --fail --silent --show-error --request PUT \
+            --header 'Content-Type: application/json' \
+            --data-binary @/connector/postgres-outbox-connector.json \
+            "$connector_url"
+          while true; do
+            status="$(curl --fail --silent --show-error "$connect_url/connectors/eventdrivenmicroservices-postgres-outbox-connector/status")"
+            running_states="$(printf '%s' "$status" | grep -oE '"state"[[:space:]]*:[[:space:]]*"RUNNING"' | wc -l)"
+            if [ "$running_states" -ge 2 ]; then
+              break
+            fi
+            sleep 3
+          done
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - name: connector-config
+          mountPath: /connector
+          readOnly: true
+      volumes:
+      - name: connector-config
+        configMap:
+          name: eventdrivenmicroservices-debezium-connector-config

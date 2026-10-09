@@ -18,7 +18,11 @@ flowchart TD
     
     subgraph Data Consistency & Ledger
         API -->|Atomic Reactive Tx| PG[(PostgreSQL 15 R2DBC)]
-        PG -->|outbox_events| RELAY[Outbox Processor Relay]
+        PG -->|outbox_events| RELAY[Outbox Processor Relay - default mode]
+        PG -->|logical WAL - CDC mode| DEBEZIUM[Debezium PostgreSQL Connector]
+        DEBEZIUM -->|raw row-change event| CDC[CDC shadow topic]
+        CDC --> BRIDGE[CDC Envelope Bridge]
+        BRIDGE -->|versioned EventEnvelope| KAFKA
         PG -->|ledger_events| LEDGER[SHA-256 Chained Ledger]
     end
 
@@ -63,7 +67,7 @@ Every HTTP response includes an `X-Correlation-Id` header (generated or preserve
 
 To provide at-least-once delivery without distributed two-phase commit:
 1. **Atomic Dual-Write:** The business entity and the corresponding outbox record are committed together in a single PostgreSQL R2DBC transaction.
-2. **Scheduled Outbox Relay:** A background publisher queries pending events in batches of up to 50, claims leases, publishes sequentially, and isolates per-event failures. Failed publishes use capped exponential retry delay.
+2. **Selectable Publisher:** `OUTBOX_PUBLISHER_MODE` is `poller` by default. In poller mode, a background publisher queries pending events in batches of up to 50, claims leases, publishes sequentially, and isolates per-event failures with capped exponential retry delay. In opt-in `cdc` mode, PostgreSQL logical replication feeds Debezium's insert-only shadow topic; the CDC bridge maps the row to the same envelope and canonical topic, waits for Kafka acknowledgement, then sets `processed` to mean published (not consumer-processed). The two publishers are mutually exclusive.
 3. **Kafka Header Injection:** When present, the stored W3C `traceparent` is injected into the Kafka record header. This is partial propagation, not a verified end-to-end trace.
 4. **Contract Envelope:** Payloads are serialized using the current `EventEnvelope` schema (`eventVersion`):
    ```json
@@ -78,6 +82,8 @@ To provide at-least-once delivery without distributed two-phase commit:
     "payload": "{...}"
    }
    ```
+
+  CDC's canonical publish and the subsequent `processed` update are not a distributed transaction. If the bridge publishes and then fails before updating PostgreSQL, replay can publish the same event again; consumers must deduplicate by stable `eventId`. Connector restart/replay and consumer idempotency are not yet verified.
 
 ---
 
@@ -97,7 +103,7 @@ The anomaly detection engine runs in-process with dual-backend state management:
 * **Financial Velocity Anomaly:** Flags a five-second window when transaction count reaches five or the summed amount exceeds $10,000. State uses Redis when available, with a per-process in-memory fallback that is not shared across replicas.
 * **Telemetry Z-Score Outlier:** Calculates rolling mean ($\mu$) and standard deviation ($\sigma$) from prior readings (up to 20), flagging an observation where:
   $$Z = \frac{|x - \mu|}{\sigma} \ge 3.0$$
-* **Kafka alert listener:** The listener searches serialized event text for anomaly markers and forwards matching records. It is not a rules-based CEP engine, and live consumer retry/alert delivery behavior has not been verified.
+* **Kafka anomaly listener:** Parses `EventEnvelope` and routes only recognized anomaly `eventType` values. It persists a PostgreSQL alert intent keyed by `eventId` before returning; a leased relay publishes the intent to the alert topic and marks it delivered only after Kafka acknowledgement. Repeated input events create one intent. Delivery remains at-least-once: a relay crash after Kafka acknowledgement but before the database update can duplicate an alert, so downstream alert consumers must deduplicate by `eventId`. This is not a rules-based CEP engine.
 
 ---
 

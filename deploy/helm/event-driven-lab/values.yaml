@@ -3,6 +3,10 @@
 global:
   env: "dev"
 
+outbox:
+  publisher:
+    mode: poller
+
 platformEngine:
   replicaCount: 1
   image:

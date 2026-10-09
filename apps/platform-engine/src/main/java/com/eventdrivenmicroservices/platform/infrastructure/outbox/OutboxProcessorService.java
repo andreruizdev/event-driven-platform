@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.eventdrivenmicroservices.platform.infrastructure.observability.OutboxMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -17,6 +18,7 @@ import java.util.UUID;
 
 @Service
 @Slf4j
+@ConditionalOnProperty(prefix = "app.outbox.publisher", name = "mode", havingValue = "poller", matchIfMissing = true)
 public class OutboxProcessorService {
 
     private final OutboxEventRepository outboxEventRepository;

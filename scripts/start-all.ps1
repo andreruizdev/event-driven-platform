@@ -77,10 +77,15 @@ if (-not (Test-Path .env)) {
     } else {
         @"
 EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD=local-dev-password
+DEBEZIUM_PASSWORD=local-dev-debezium-password
 SPRING_SECURITY_USER_PASSWORD=local-dev-password
 JWT_SECRET_KEY=local-dev-jwt-secret-key-32-bytes-long!
 "@ | Set-Content .env
     }
+}
+
+if (-not (Select-String -Path .env -Pattern '^DEBEZIUM_PASSWORD=' -Quiet)) {
+    Add-Content .env 'DEBEZIUM_PASSWORD=local-dev-debezium-password'
 }
 
 kubectl delete secret eventdrivenmicroservices-secrets --ignore-not-found

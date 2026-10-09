@@ -46,6 +46,8 @@ spec:
           value: "eventdrivenmicroservices-redis"
         - name: SPRING_DATA_REDIS_PORT
           value: "6379"
+        - name: OUTBOX_PUBLISHER_MODE
+          value: {{ .Values.outbox.publisher.mode | quote }}
         - name: EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_URL
           value: "jdbc:postgresql://eventdrivenmicroservices-postgres:5432/eventdrivenmicroservices_db"
         - name: SPRING_FLYWAY_URL

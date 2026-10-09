@@ -17,6 +17,7 @@ spec:
       containers:
       - name: postgres
         image: postgres:15-alpine
+        args: ["postgres", "-c", "wal_level=logical"]
         securityContext:
           allowPrivilegeEscalation: false
         env:
@@ -43,6 +44,75 @@ spec:
     - protocol: TCP
       port: 5432
       targetPort: 5432
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: eventdrivenmicroservices-postgres-cdc-bootstrap
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: configure-cdc
+        image: postgres:15-alpine
+        command: ["sh", "-ec"]
+        args:
+        - |
+          until PGPASSWORD="$POSTGRES_PASSWORD" psql -h eventdrivenmicroservices-postgres -U postgres -d eventdrivenmicroservices_db -c 'SELECT 1' >/dev/null 2>&1; do
+            sleep 3
+          done
+          until PGPASSWORD="$POSTGRES_PASSWORD" psql -h eventdrivenmicroservices-postgres -U postgres -d eventdrivenmicroservices_db -tAc "SELECT to_regclass('public.outbox_events') IS NOT NULL" | grep -q t; do
+            sleep 3
+          done
+          PGPASSWORD="$POSTGRES_PASSWORD" psql -v ON_ERROR_STOP=1 -v debezium_password="$DEBEZIUM_PASSWORD" -h eventdrivenmicroservices-postgres -U postgres -d eventdrivenmicroservices_db <<'SQL'
+          SELECT format('CREATE ROLE debezium_replication WITH LOGIN REPLICATION PASSWORD %L', :'debezium_password')
+          WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'debezium_replication')
+          \gexec
+          ALTER ROLE debezium_replication WITH LOGIN REPLICATION PASSWORD :'debezium_password';
+          GRANT SELECT ON TABLE public.outbox_events TO debezium_replication;
+          SELECT 'CREATE PUBLICATION eventdrivenmicroservices_outbox_publication FOR TABLE public.outbox_events WITH (publish = ''insert'')'
+          WHERE NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'eventdrivenmicroservices_outbox_publication')
+          \gexec
+          ALTER PUBLICATION eventdrivenmicroservices_outbox_publication SET TABLE public.outbox_events;
+          ALTER PUBLICATION eventdrivenmicroservices_outbox_publication SET (publish = 'insert');
+          SQL
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: eventdrivenmicroservices-secrets
+              key: POSTGRES_PASSWORD
+        - name: DEBEZIUM_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: eventdrivenmicroservices-secrets
+              key: DEBEZIUM_PASSWORD
 ---
 apiVersion: apps/v1
 kind: Deployment

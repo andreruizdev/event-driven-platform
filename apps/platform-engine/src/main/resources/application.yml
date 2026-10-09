@@ -50,6 +50,12 @@ eventdrivenmicroservices:
       driver-class-name: org.postgresql.Driver
 
 app:
+  outbox:
+    publisher:
+      mode: ${OUTBOX_PUBLISHER_MODE:poller}
+    cdc-bridge:
+      source-topic: ${OUTBOX_CDC_SOURCE_TOPIC:eventdrivenmicroservices_cdc.public.outbox_events}
+      group-id: ${OUTBOX_CDC_GROUP_ID:eventdrivenmicroservices-cdc-envelope-bridge}
   validation:
     loan:
       active-tier: MEDIUM
