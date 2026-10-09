@@ -8,7 +8,7 @@ Last checked: 2026-10-09.
 
 | Area | Current evidence |
 |---|---|
-| Java build and tests | Latest CI run for `195c0fe` passed all 37 tests. Local full suite on 2026-10-09 passed 40 of 43 tests; 3 Docker-backed integration tests were skipped, with 0 failures/errors. |
+| Java build and tests | Latest CI run for `195c0fe` passed all 37 tests. Local full suite on 2026-10-09 passed 42 of 45 tests; 3 Docker-backed integration tests were skipped, with 0 failures/errors. |
 | Debezium CDC | Optional CDC mode is live-verified in isolated Kind namespace `cdc-validation`: connector/task reached `RUNNING`; a committed outbox row reached the shadow topic and the bridge emitted the canonical `EventEnvelope`, after which the row was marked processed. Poller remains the default mode. Connector restart/replay and CDC consumer crash recovery remain unverified. |
 | Fast behavior tests | Controller, service, anomaly, outbox, JWT signature/configuration, and architecture tests pass. |
 | Outbox observability | Pending count/age gauges, publish/failure/retry counters, latency histogram, and payload-free recent-event summaries are implemented and covered by unit/controller tests. |
@@ -19,6 +19,7 @@ Last checked: 2026-10-09.
 | E2E business slices | CI verifies loan -> PostgreSQL/outbox -> Kafka -> ledger and Redis-backed anomaly -> alert topic with `traceparent`. Browser-driven UI behavior, full Tempo trace visualization, and the telemetry UI workflow remain unverified. |
 | CDC runtime check | On 2026-10-09, an isolated chart release registered the Debezium connector and verified a synthetic PostgreSQL insert in `eventdrivenmicroservices-outbox-events` as version-1 envelope with key/event ID/traceparent; database `processed=true` followed successful publication. This does not verify restart/replay or production cutover. |
 | Anomaly consumer durability | On 2026-10-09, isolated Kind verified anomaly envelope -> event-ID-keyed PostgreSQL alert intent -> alert topic; the row was marked published after Kafka acknowledgement. Replaying the same canonical event ID left one published intent. Broker crash-window duplicates and poison-event policy remain open. |
+| Poison event handling | On 2026-10-09, isolated Kind verified malformed canonical input reaches the seven-day DLT with source topic/partition/offset metadata. Parser headers use a fixed payload-free message. Transient listener errors use an indefinite one-second retry policy; live outage recovery is not yet verified. |
 
 Do not promote skipped, mocked, or stale-cluster checks to “verified” status. Update this table only from a dated executable result.
 
@@ -100,8 +101,10 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 - [x] Parse the versioned envelope and route anomaly handling by exact `eventType`; serialized payload contents no longer control routing.
 - [x] Persist alert intents in PostgreSQL with a unique `eventId` before acknowledging the input record; retry alert-topic publication independently with bounded backoff.
 - [x] Verify duplicate input replay creates one alert intent in isolated Kind.
+- [x] Route malformed/unsupported envelopes to an explicitly provisioned seven-day DLT with original Kafka coordinates; parser diagnostics do not copy rejected payload data into headers.
+- [x] Configure indefinite one-second retries for transient listener failures; live outage recovery remains unverified.
 - [ ] Exercise connector restart, consumer crash between intent commit and offset commit, Kafka outage, and recovery. The relay may duplicate the alert if it crashes after Kafka acknowledgement but before marking the intent published; downstream alert consumers must deduplicate by `eventId`.
-- [ ] Define poison-event and dead-letter behavior, and measure bounded backlog/lag/recovery targets.
+- [ ] Measure bounded backlog/lag/recovery targets and define DLT inspection/replay operations.
 - [ ] Measure high-volume bursts and sustained throughput; specify bounded backlog, consumer lag, and recovery-time targets before claiming surge tolerance.
 
 **Exit gate:** Duplicate receipt intent is deduplicated and alert delivery is retried; complete the crash/outage drills and downstream idempotency before claiming replay-safe business effects.

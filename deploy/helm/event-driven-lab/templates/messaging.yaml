@@ -260,6 +260,52 @@ spec:
   - port: 8083
     targetPort: 8083
 ---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: eventdrivenmicroservices-kafka-dlt-bootstrap
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-8"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: create-dead-letter-topic
+        image: confluentinc/cp-kafka:7.5.0
+        command: ["bash", "-ec"]
+        args:
+        - |
+          cub kafka-ready -b eventdrivenmicroservices-kafka:9092 1 120
+          kafka-topics --bootstrap-server eventdrivenmicroservices-kafka:9092 \
+            --create --if-not-exists \
+            --topic eventdrivenmicroservices-outbox-events.DLT \
+            --partitions 1 --replication-factor 1 \
+            --config cleanup.policy=delete --config retention.ms=604800000
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -135,7 +135,10 @@ class TraceFlowIntegrationTest {
         AnomalyAlertOutboxRepository alertOutboxRepository = mock(AnomalyAlertOutboxRepository.class);
         when(alertOutboxRepository.insertIfAbsent(any(UUID.class), any(String.class), any(String.class),
             any(String.class), any(Instant.class))).thenReturn(Mono.just(1));
-        AnomalyEventListener listener = new AnomalyEventListener(objectMapper, alertOutboxRepository);
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> alertKafkaTemplate = mock(KafkaTemplate.class);
+        AnomalyEventListener listener = new AnomalyEventListener(
+            objectMapper, alertKafkaTemplate, alertOutboxRepository);
 
         listener.consumeOutboxEvent(consumerRecord);
 

@@ -13,6 +13,8 @@ import org.springframework.kafka.core.KafkaTemplate;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -27,12 +29,14 @@ import reactor.core.publisher.Mono;
 class AnomalyEventListenerTest {
 
     @Test
+        @SuppressWarnings("unchecked")
         void forwardsTraceparentToAnomalyAlert() throws Exception {
         AnomalyAlertOutboxRepository repository = mock(AnomalyAlertOutboxRepository.class);
+                KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         when(repository.insertIfAbsent(any(UUID.class), any(String.class), any(String.class),
                 any(String.class), any(Instant.class))).thenReturn(Mono.just(1));
         ObjectMapper objectMapper = objectMapper();
-        AnomalyEventListener listener = new AnomalyEventListener(objectMapper, repository);
+                AnomalyEventListener listener = new AnomalyEventListener(objectMapper, kafkaTemplate, repository);
         RecordHeaders headers = new RecordHeaders();
         headers.add("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
                 .getBytes(StandardCharsets.UTF_8));
@@ -56,7 +60,8 @@ class AnomalyEventListenerTest {
     @SuppressWarnings("unchecked")
     void ignoresNonAnomalyEventTypesRegardlessOfPayloadText() throws Exception {
                 AnomalyAlertOutboxRepository repository = mock(AnomalyAlertOutboxRepository.class);
-                AnomalyEventListener listener = new AnomalyEventListener(objectMapper(), repository);
+                KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+                AnomalyEventListener listener = new AnomalyEventListener(objectMapper(), kafkaTemplate, repository);
         ConsumerRecord<String, String> record = new ConsumerRecord<>(
                 "eventdrivenmicroservices-outbox-events", 0, 0L, "aggregate-1",
                 envelope(objectMapper(), "TransactionCreated", "{\"note\":\"ANOMALY\"}"));
@@ -67,18 +72,64 @@ class AnomalyEventListenerTest {
     }
 
     @Test
+        @SuppressWarnings("unchecked")
     void propagatesDatabaseFailureSoTheInputIsNotAcknowledged() throws Exception {
         AnomalyAlertOutboxRepository repository = mock(AnomalyAlertOutboxRepository.class);
+                KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
         when(repository.insertIfAbsent(any(UUID.class), any(String.class), any(String.class),
                 any(String.class), any(Instant.class)))
                 .thenReturn(Mono.error(new IllegalStateException("database unavailable")));
         ObjectMapper objectMapper = objectMapper();
-        AnomalyEventListener listener = new AnomalyEventListener(objectMapper, repository);
+        AnomalyEventListener listener = new AnomalyEventListener(objectMapper, kafkaTemplate, repository);
         ConsumerRecord<String, String> record = new ConsumerRecord<>(
                 "eventdrivenmicroservices-outbox-events", 0, 0L, "aggregate-1",
                 envelope(objectMapper, "TelemetryAnomalyDetected", "{}"));
 
         assertThrows(IllegalStateException.class, () -> listener.consumeOutboxEvent(record));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void deadLettersMalformedEnvelopeWithOriginalCoordinatesAfterKafkaAcknowledges() throws Exception {
+        AnomalyAlertOutboxRepository repository = mock(AnomalyAlertOutboxRepository.class);
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        when(kafkaTemplate.send(any(ProducerRecord.class)))
+                .thenReturn(CompletableFuture.completedFuture(null));
+        AnomalyEventListener listener = new AnomalyEventListener(objectMapper(), kafkaTemplate, repository);
+        ConsumerRecord<String, String> record = new ConsumerRecord<>(
+                "eventdrivenmicroservices-outbox-events", 3, 17L, "aggregate-1", "not-json-sensitive-value");
+
+        listener.consumeOutboxEvent(record);
+
+        @SuppressWarnings("unchecked")
+        var captor = org.mockito.ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaTemplate).send(captor.capture());
+        ProducerRecord<String, String> deadLetter = captor.getValue();
+        assertEquals("eventdrivenmicroservices-outbox-events.DLT", deadLetter.topic());
+        assertEquals("aggregate-1", deadLetter.key());
+        assertEquals("not-json-sensitive-value", deadLetter.value());
+        assertEquals("eventdrivenmicroservices-outbox-events",
+                new String(deadLetter.headers().lastHeader("x-original-topic").value(), StandardCharsets.UTF_8));
+        assertEquals("3", new String(deadLetter.headers().lastHeader("x-original-partition").value(), StandardCharsets.UTF_8));
+        assertEquals("17", new String(deadLetter.headers().lastHeader("x-original-offset").value(), StandardCharsets.UTF_8));
+        assertEquals("Malformed JSON event envelope", new String(
+                deadLetter.headers().lastHeader("x-exception-message").value(), StandardCharsets.UTF_8));
+        verifyNoInteractions(repository);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void propagatesDeadLetterPublishFailureSoTheInputIsNotAcknowledged() throws Exception {
+        AnomalyAlertOutboxRepository repository = mock(AnomalyAlertOutboxRepository.class);
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        CompletableFuture<Object> failedSend = new CompletableFuture<>();
+        failedSend.completeExceptionally(new IllegalStateException("broker unavailable"));
+        when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(failedSend);
+        AnomalyEventListener listener = new AnomalyEventListener(objectMapper(), kafkaTemplate, repository);
+
+        assertThrows(ExecutionException.class, () -> listener.consumeOutboxEvent(
+                new ConsumerRecord<>("eventdrivenmicroservices-outbox-events", 0, 0L, "key", "not-json")));
+        verifyNoInteractions(repository);
     }
 
     private ObjectMapper objectMapper() {
