@@ -8,11 +8,11 @@ Last checked: 2026-10-09.
 
 | Area | Current evidence |
 |---|---|
-| Java build and tests | `./gradlew test --no-daemon` succeeds: 36 tests, 34 passed, 2 skipped, 0 failures. |
+| Java build and tests | `./gradlew test --no-daemon` succeeds: 37 tests, 34 passed, 3 skipped, 0 failures. |
 | Fast behavior tests | Controller, service, anomaly, outbox, JWT signature/configuration, and architecture tests pass. |
 | Outbox observability | Pending count/age gauges, publish/failure/retry counters, latency histogram, and payload-free recent-event summaries are implemented and covered by unit/controller tests. |
 | Control room | Updated HTML, CSS, and JavaScript were served from the current local Spring process; `/api/v1/outbox/recent` returned HTTP 200 with Basic authentication. No browser automation or JavaScript runtime is installed in this container. |
-| PostgreSQL/Kafka integration | Not established by the latest local run. `IntegrationTests` and `E2EOutboxIntegrationTest` skipped because Docker-backed tests were unavailable. CI now provides a health-checked PostgreSQL service, prioritizes its connection settings, and fails if either report is missing or skipped; a GitHub Actions run is still required to verify the fix. |
+| PostgreSQL/Kafka integration | Not established by the latest local run. `IntegrationTests` and both `E2EOutboxIntegrationTest` cases skipped because Docker-backed tests were unavailable. CI now provides health-checked PostgreSQL and Redis services, prioritizes their connection settings, and fails if either integration report is missing or skipped; a GitHub Actions run is still required to verify the path. |
 | Helm and Grafana | `helm lint` and `helm template` pass for `deploy/helm/event-driven-lab`, including the new outbox panels. Live dashboard queries have not been verified against a deployed current checkout. |
 | Kind | Twelve application-stack pods were Ready in the existing cluster, but they predated the current checkout; no fresh deployment was verified. |
 | Full business workflow | Not verified. `scripts/demo.sh` submits requests and prints responses but does not assert Kafka delivery, anomaly results, ledger integrity, or trace visibility. |
@@ -58,7 +58,7 @@ cd apps/platform-engine
 ./gradlew test --no-daemon
 ```
 
-`IntegrationTests` now performs `SELECT 1` through the configured R2DBC `DatabaseClient`. `E2EOutboxIntegrationTest` posts a loan and checks that an unprocessed outbox record exists; it does not assert Kafka publication or consumer behavior. Both tests prefer explicit `SPRING_R2DBC_*` and `SPRING_FLYWAY_*` endpoints when provided, with runtime-mapped Testcontainers URLs as the local fallback. The GitHub Actions test job supplies a health-checked PostgreSQL service on port 5432 and fails if these test reports are missing or skipped. Expand the workflow assertions before treating Kafka/outbox delivery as fully verified.
+`IntegrationTests` performs `SELECT 1` through the configured R2DBC `DatabaseClient`. The E2E suite asserts loan persistence, its outbox event, Kafka envelope/key delivery, processed state, and a ledger entry; a second case asserts Redis-backed high-value anomaly detection, anomaly outbox publication, alert-topic delivery, and `traceparent` preservation. Both tests prefer explicit `SPRING_R2DBC_*` and `SPRING_FLYWAY_*` endpoints when provided, with runtime-mapped Testcontainers URLs as the local fallback; Redis uses the CI service or a local Testcontainers container. CI fails if either integration report is missing or skipped. These E2E assertions compile but remain unverified at runtime until a Docker-backed GitHub Actions run succeeds.
 
 ### Deployment and workflow evidence
 

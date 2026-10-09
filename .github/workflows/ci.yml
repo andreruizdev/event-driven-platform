@@ -60,6 +60,15 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
     env:
       SPRING_R2DBC_URL: r2dbc:postgresql://localhost:5432/eventdrivenmicroservices
       SPRING_R2DBC_USERNAME: postgres
@@ -68,6 +77,8 @@ jobs:
       SPRING_FLYWAY_USER: postgres
       SPRING_FLYWAY_PASSWORD: postgres
       SPRING_SECURITY_USER_PASSWORD: ci-test-password
+      SPRING_DATA_REDIS_HOST: localhost
+      SPRING_DATA_REDIS_PORT: 6379
     steps:
       - uses: actions/checkout@v4
 
