@@ -1,6 +1,8 @@
 package com.eventdrivenmicroservices.platform;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyAlertOutboxRepository;
+import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyEventListener;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.EventEnvelope;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.LedgerEventRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.LoanApplicationRepository;
@@ -10,6 +12,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.springframework.r2dbc.core.DatabaseClient;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -81,6 +84,15 @@ public class E2EOutboxIntegrationTest {
 
     @Autowired
     private LedgerEventRepository ledgerEventRepository;
+
+    @Autowired
+    private AnomalyEventListener anomalyEventListener;
+
+    @Autowired
+    private AnomalyAlertOutboxRepository anomalyAlertOutboxRepository;
+
+    @Autowired
+    private DatabaseClient databaseClient;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -171,6 +183,11 @@ public class E2EOutboxIntegrationTest {
         Assertions.assertEquals("TransactionAnomalyDetected", envelope.eventType());
         Assertions.assertEquals(TRACEPARENT, traceparent(outboxRecord));
 
+        awaitAlertIntent(anomalyEvent.getId());
+        Assertions.assertEquals(1, countAlertIntents(anomalyEvent.getId()));
+        anomalyEventListener.consumeOutboxEvent(outboxRecord);
+        Assertions.assertEquals(1, countAlertIntents(anomalyEvent.getId()));
+
         ConsumerRecord<String, String> alertRecord = consumeKafkaRecord(
             "eventdrivenmicroservices-anomaly-alerts", anomalyEvent.getId());
         Assertions.assertEquals(envelope.eventId(), objectMapper.readValue(alertRecord.value(), EventEnvelope.class).eventId());
@@ -221,5 +238,27 @@ public class E2EOutboxIntegrationTest {
                 .expectNextMatches(event -> event.isProcessed())
                 .thenCancel()
                 .verify(Duration.ofSeconds(6));
+    }
+
+    private void awaitAlertIntent(UUID eventId) {
+        reactor.test.StepVerifier.create(anomalyAlertOutboxRepository.findById(eventId)
+                        .repeatWhenEmpty(retries -> retries.delayElements(Duration.ofMillis(100)).take(50)))
+                .expectNextCount(1)
+                .thenCancel()
+                .verify(Duration.ofSeconds(6));
+    }
+
+    private long countAlertIntents(UUID eventId) {
+        Long count = databaseClient.sql("""
+                        SELECT COUNT(*) AS intent_count
+                        FROM anomaly_alert_outbox
+                        WHERE event_id = :eventId
+                        """)
+                .bind("eventId", eventId)
+                .map((row, metadata) -> row.get("intent_count", Long.class))
+                .one()
+                .block(Duration.ofSeconds(5));
+        Assertions.assertNotNull(count);
+        return count;
     }
 }

@@ -52,6 +52,7 @@ These run without Docker:
 - Controller and service contracts.
 - Loan validation and anomaly scoring, including the control-room six-reading baseline followed by an outlier.
 - Outbox envelope, failure isolation, retry delay, and event-listener mocked contract.
+- Alert relay Kafka-send failure followed by retry-after-recovery (`AnomalyAlertOutboxRelayTest`); focused local run on 2026-10-09 passed all 3 tests, using a mocked Kafka broker.
 - JWT HMAC signature comparison and required-secret profile guard.
 - ArchUnit rules for `Thread.sleep` and JDBC dependencies in API/application packages.
 
@@ -65,6 +66,8 @@ cd apps/platform-engine
 ```
 
 `IntegrationTests` performs `SELECT 1` through the configured R2DBC `DatabaseClient`. The E2E suite asserts loan persistence, its outbox event, Kafka envelope/key delivery, processed state, and a ledger entry; a second case asserts Redis-backed high-value anomaly detection, anomaly outbox publication, alert-topic delivery, and `traceparent` preservation. Both tests prefer explicit `SPRING_R2DBC_*` and `SPRING_FLYWAY_*` endpoints when provided, with runtime-mapped Testcontainers URLs as the local fallback; Redis uses the CI service or a local Testcontainers container. Both backend E2E cases passed in CI on `195c0fe`; they do not establish browser behavior, full trace visualization, or durable storage across pod replacement.
+
+The anomaly E2E case also redelivers an event after its alert intent is durable and checks that only one row exists for that event ID. The focused local run on 2026-10-09 skipped both Docker-backed tests because Testcontainers' Docker client used API 1.32 while the local daemon requires at least API 1.40; this assertion is not verification evidence.
 
 ### Deployment and workflow evidence
 
@@ -103,6 +106,8 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 - [x] Verify duplicate input replay creates one alert intent in isolated Kind.
 - [x] Route malformed/unsupported envelopes to an explicitly provisioned seven-day DLT with original Kafka coordinates; parser diagnostics do not copy rejected payload data into headers.
 - [x] Configure indefinite one-second retries for transient listener failures; live outage recovery remains unverified.
+- [x] Add a focused unit test for the alert relay's Kafka-send failure followed by successful retry; all 3 tests passed locally on 2026-10-09. Mock-only, not a live broker outage drill.
+- [ ] Run the PostgreSQL-backed duplicate-delivery E2E assertion (local run skipped because the Testcontainers Docker API client is older than the local daemon's minimum supported API).
 - [ ] Exercise connector restart, consumer crash between intent commit and offset commit, Kafka outage, and recovery. The relay may duplicate the alert if it crashes after Kafka acknowledgement but before marking the intent published; downstream alert consumers must deduplicate by `eventId`.
 - [ ] Measure bounded backlog/lag/recovery targets and define DLT inspection/replay operations.
 - [ ] Measure high-volume bursts and sustained throughput; specify bounded backlog, consumer lag, and recovery-time targets before claiming surge tolerance.

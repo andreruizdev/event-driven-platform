@@ -71,6 +71,29 @@ class AnomalyAlertOutboxRelayTest {
         verify(repository, never()).markPublished(any(UUID.class), any(Instant.class));
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void retriesAndMarksIntentPublishedAfterKafkaRecovers() {
+        AnomalyAlertOutboxEvent event = event();
+        CompletableFuture<Object> failedSend = new CompletableFuture<>();
+        failedSend.completeExceptionally(new IllegalStateException("broker unavailable"));
+        when(repository.claimNext(any(Instant.class), any(Instant.class)))
+                .thenReturn(Mono.just(event), Mono.just(event));
+        when(kafkaTemplate.send(any(ProducerRecord.class)))
+                .thenReturn(failedSend, CompletableFuture.completedFuture(null));
+        when(repository.recordFailure(eq(EVENT_ID), any(), any(Instant.class))).thenReturn(Mono.just(1));
+        when(repository.markPublished(eq(EVENT_ID), any(Instant.class))).thenReturn(Mono.just(1));
+
+        relay.publishNextAlert();
+        relay.publishNextAlert();
+
+        var recordCaptor = org.mockito.ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaTemplate, org.mockito.Mockito.times(2)).send(recordCaptor.capture());
+        assertEquals(recordCaptor.getAllValues().get(0).value(), recordCaptor.getAllValues().get(1).value());
+        verify(repository).recordFailure(eq(EVENT_ID), eq("broker unavailable"), any(Instant.class));
+        verify(repository).markPublished(eq(EVENT_ID), any(Instant.class));
+    }
+
     private AnomalyAlertOutboxEvent event() {
         return new AnomalyAlertOutboxEvent(
                 EVENT_ID,
