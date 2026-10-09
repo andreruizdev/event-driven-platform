@@ -118,6 +118,8 @@ jobs:
 
       - name: Create k8s Kind Cluster
         uses: helm/kind-action@v1.8.0
+        with:
+          cluster_name: eventdrivenmicroservices-cluster
 
       - name: Build Docker Image
         run: |
@@ -125,7 +127,7 @@ jobs:
 
       - name: Load Image into Kind
         run: |
-          kind load docker-image platform-engine:local
+          kind load docker-image platform-engine:local --name eventdrivenmicroservices-cluster
 
       - name: Deploy Helm Chart
         run: |
@@ -139,11 +141,13 @@ jobs:
 
           helm upgrade --install event-driven-lab ./deploy/helm/event-driven-lab \
             --namespace event-driven-lab \
+            --set platformEngine.image.repository=platform-engine \
             --set platformEngine.image.pullPolicy=Never \
             --set platformEngine.image.tag=local \
             --wait --timeout=300s
 
       - name: Verify Deployment
         run: |
-          kubectl get pods -A
-          kubectl wait --for=condition=ready pod --all --timeout=300s
+          kubectl get pods -n event-driven-lab
+          kubectl wait --for=condition=ready pod --all --namespace event-driven-lab --timeout=300s
+          kubectl rollout status deployment/platform-engine --namespace event-driven-lab --timeout=300s

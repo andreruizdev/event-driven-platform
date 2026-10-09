@@ -35,6 +35,8 @@ helm template event-driven-lab deploy/helm/event-driven-lab >/dev/null
 
 The Windows wrapper is `apps/platform-engine/gradlew.bat`. The full local orchestration entry point is `scripts/start-all.sh` or `scripts/start-all.ps1`; it builds an image, applies local Terraform, manages a Kubernetes secret, and installs the chart. Use it only against the intended local Kind context.
 
+The local Terraform cluster and CI Kind cluster are both named `eventdrivenmicroservices-cluster`. CI builds and loads `platform-engine:local`, then installs chart `event-driven-lab` as release `event-driven-lab` in namespace `event-driven-lab`; the Helm image repository/tag overrides must remain aligned with that built image.
+
 For the UI and API, port-forward `svc/platform-engine` to local port 8080. The default `admin` / `local-dev-password` credentials are development fallbacks only; never use them in a shared or production environment. `scripts/demo.sh` and `scripts/demo.ps1` are request generators, not end-to-end assertion suites.
 
 ## Test Scope
