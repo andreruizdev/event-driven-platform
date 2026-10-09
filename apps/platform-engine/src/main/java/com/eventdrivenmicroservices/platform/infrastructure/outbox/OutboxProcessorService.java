@@ -24,6 +24,7 @@ public class OutboxProcessorService {
     private final String instanceId = "instance-" + UUID.randomUUID();
 
     private static final Duration LOCK_DURATION = Duration.ofSeconds(30);
+    private static final Duration MAX_RETRY_DELAY = Duration.ofMinutes(5);
 
     public OutboxProcessorService(OutboxEventRepository outboxEventRepository,
                                   @Autowired(required = false) KafkaTemplate<String, String> kafkaTemplate,
@@ -58,13 +59,13 @@ public class OutboxProcessorService {
     private Mono<OutboxEvent> recordFailure(OutboxEvent event, Throwable error) {
         log.error("Failed to process outbox event: {}", event.getId(), error);
         event.setRetryCount(event.getRetryCount() + 1);
+        long delaySeconds = Math.min(5L << Math.min(event.getRetryCount() - 1, 6), MAX_RETRY_DELAY.toSeconds());
         String errorMsg = error.getMessage();
         if (errorMsg != null && errorMsg.length() > 500) {
             errorMsg = errorMsg.substring(0, 500);
         }
         event.setLastError(errorMsg);
-        // Release lock so it can be retried after backoff
-        event.setLockedUntil(Instant.now());
+        event.setLockedUntil(Instant.now().plusSeconds(delaySeconds));
         return outboxEventRepository.save(event);
     }
 

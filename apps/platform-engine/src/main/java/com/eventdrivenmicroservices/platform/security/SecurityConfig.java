@@ -1,5 +1,6 @@
 package com.eventdrivenmicroservices.platform.security;
 
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,7 +24,9 @@ import reactor.core.publisher.Mono;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.Arrays;
 import java.util.Collections;
 
 @Configuration
@@ -32,6 +35,19 @@ public class SecurityConfig {
 
     @Value("${JWT_SECRET_KEY:#{null}}")
     private String jwtSecretKey;
+
+    @Value("${spring.profiles.active:}")
+    private String activeProfiles;
+
+    @PostConstruct
+    void validateJwtConfiguration() {
+        boolean secretRequired = Arrays.stream(activeProfiles.split(","))
+                .map(String::trim)
+                .anyMatch(profile -> profile.equals("k8s") || profile.equals("prod"));
+        if (secretRequired && (jwtSecretKey == null || jwtSecretKey.isBlank())) {
+            throw new IllegalStateException("JWT_SECRET_KEY must be configured for k8s and prod profiles");
+        }
+    }
 
     @Bean
     public SecurityWebFilterChain filterChain(ServerHttpSecurity http) {
@@ -73,7 +89,8 @@ public class SecurityConfig {
         };
     }
 
-    private boolean validateJwtToken(String token, String secret) {
+    boolean validateJwtToken(String token, String secret) {
+        if (secret == null || secret.isBlank()) return false;
         try {
             String[] parts = token.split("\\.");
             if (parts.length != 3) return false;
@@ -82,8 +99,8 @@ public class SecurityConfig {
             SecretKeySpec secretKey = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
             sha256Hmac.init(secretKey);
             byte[] signatureBytes = sha256Hmac.doFinal(headerAndPayload.getBytes(StandardCharsets.UTF_8));
-            String expectedSignature = Base64.getUrlEncoder().withoutPadding().encodeToString(signatureBytes);
-            return expectedSignature.equals(parts[2]);
+            byte[] providedSignature = Base64.getUrlDecoder().decode(parts[2]);
+            return MessageDigest.isEqual(signatureBytes, providedSignature);
         } catch (Exception e) {
             return false;
         }

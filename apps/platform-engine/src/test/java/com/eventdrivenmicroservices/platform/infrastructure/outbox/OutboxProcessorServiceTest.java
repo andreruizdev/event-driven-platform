@@ -65,6 +65,7 @@ class OutboxProcessorServiceTest {
     void processOutboxEvents_KafkaFailureOnFirstEvent_IsolatesErrorAndProcessesSecondEvent() {
         OutboxEvent failingEvent = createEvent("failing-agg", "LoanApplication");
         OutboxEvent successfulEvent = createEvent("success-agg", "FinancialTransaction");
+        Instant retryCheckStarted = Instant.now();
 
         when(repository.findPendingForClaim(any(Instant.class), eq(50))).thenReturn(Flux.just(failingEvent, successfulEvent));
         when(repository.claimLock(any(UUID.class), anyString(), any(Instant.class), any(Instant.class))).thenReturn(Mono.just(1));
@@ -85,7 +86,10 @@ class OutboxProcessorServiceTest {
         processorService.processOutboxEvents();
 
         verify(repository, times(1)).save(argThat(e -> "success-agg".equals(e.getAggregateId()) && e.isProcessed()));
-        verify(repository, times(1)).save(argThat(e -> "failing-agg".equals(e.getAggregateId()) && !e.isProcessed() && e.getRetryCount() == 1));
+        verify(repository, times(1)).save(argThat(e -> "failing-agg".equals(e.getAggregateId())
+            && !e.isProcessed()
+            && e.getRetryCount() == 1
+            && e.getLockedUntil().isAfter(retryCheckStarted.plusSeconds(4))));
     }
 
     @Test

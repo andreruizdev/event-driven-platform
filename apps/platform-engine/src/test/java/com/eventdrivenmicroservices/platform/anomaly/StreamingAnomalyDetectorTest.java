@@ -68,4 +68,16 @@ class StreamingAnomalyDetectorTest {
                 .expectNextMatches(score -> score.isAnomaly() && "TELEMETRY_Z_SCORE_OUTLIER".equals(score.getAnomalyType()))
                 .verifyComplete();
     }
+
+    @Test
+    void testTelemetryZScore_ControlRoomBaseline_FlagsOutlier() {
+        double[] baseline = {42.0, 43.0, 41.0, 44.0, 42.0, 43.0};
+        for (double reading : baseline) {
+            detector.evaluateTelemetryZScore("demo-device-001", reading).block();
+        }
+
+        StepVerifier.create(detector.evaluateTelemetryZScore("demo-device-001", 99.0))
+                .expectNextMatches(AnomalyScore::isAnomaly)
+                .verifyComplete();
+    }
 }

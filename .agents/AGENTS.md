@@ -21,7 +21,7 @@ These guidelines apply to code, deployment manifests, documentation, and automat
 
 ## 3. Documentation
 * **Reasoning Transparency**: Document reasoning, analysis, and proposed strategy before committing to major architectural shifts or executing large multi-file edits.
-* Keep `docs/rebuild_guide.md` as the canonical implementation plan.
+* Keep `docs/engineering-guide.md` as the canonical setup, verification, status, and implementation guide.
 * Document current behavior only; do not preserve obsolete component names or unsupported claims.
 * Record durable project plans in repository memory when they affect future work.
 

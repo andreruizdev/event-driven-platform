@@ -132,11 +132,14 @@ public class StreamingAnomalyDetector {
     private Mono<AnomalyScore> evaluateTelemetryWithRedis(String deviceId, double metricValue) {
         String key = "eventdrivenmicroservices:anomaly:telemetry:" + deviceId;
 
-        return redisTemplate.opsForList().leftPush(key, String.valueOf(metricValue))
-                .then(redisTemplate.opsForList().trim(key, 0, TELEMETRY_WINDOW_SIZE - 1))
-                .then(redisTemplate.expire(key, Duration.ofMinutes(10)))
-                .then(redisTemplate.opsForList().range(key, 0, -1).collectList())
-                .map(entries -> calculateZScoreFromList(deviceId, metricValue, entries));
+        return redisTemplate.opsForList().range(key, 0, -1).collectList()
+            .flatMap(entries -> {
+                AnomalyScore score = calculateZScoreFromList(deviceId, metricValue, entries);
+                return redisTemplate.opsForList().leftPush(key, String.valueOf(metricValue))
+                    .then(redisTemplate.opsForList().trim(key, 0, TELEMETRY_WINDOW_SIZE - 1))
+                    .then(redisTemplate.expire(key, Duration.ofMinutes(10)))
+                    .thenReturn(score);
+            });
     }
 
     private AnomalyScore calculateZScoreFromList(String deviceId, double metricValue, List<String> entries) {
@@ -220,41 +223,16 @@ public class StreamingAnomalyDetector {
             Deque<Double> window = telemetryWindows.computeIfAbsent(deviceId, k -> new ArrayDeque<>());
 
             synchronized (window) {
+                AnomalyScore score = calculateZScoreFromList(
+                        deviceId,
+                        metricValue,
+                        window.stream().map(String::valueOf).toList());
                 if (window.size() >= TELEMETRY_WINDOW_SIZE) {
                     window.pollFirst();
                 }
                 window.addLast(metricValue);
-
-                if (window.size() < 5) {
-                    return AnomalyScore.normal();
-                }
-
-                double sum = 0.0;
-                for (double val : window) {
-                    sum += val;
-                }
-                double mean = sum / window.size();
-
-                double varianceSum = 0.0;
-                for (double val : window) {
-                    varianceSum += Math.pow(val - mean, 2);
-                }
-                double stddev = Math.sqrt(varianceSum / window.size());
-
-                if (stddev > 0.0001) {
-                    double zScore = Math.abs(metricValue - mean) / stddev;
-                    metrics.updateZScore(zScore);
-
-                    if (zScore >= Z_SCORE_THRESHOLD) {
-                        String details = String.format("Z-Score Outlier: Value=%.2f, Mean=%.2f, StdDev=%.2f, Z-Score=%.2f", metricValue, mean, stddev, zScore);
-                        log.warn("[ANOMALY DETECTED] Device: {} | {}", deviceId, details);
-                        metrics.recordAnomaly("Z_SCORE_OUTLIER");
-                        return AnomalyScore.flagged("TELEMETRY_Z_SCORE_OUTLIER", zScore, details);
-                    }
-                }
+                return score;
             }
-
-            return AnomalyScore.normal();
         });
     }
 

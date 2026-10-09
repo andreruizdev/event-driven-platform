@@ -7,5 +7,5 @@ description: "Use when reviewing README, rebuild guide, agent guidance, or opera
 
 1. Search documentation for paths, service names, environment variables, topics, and packages that no longer exist.
 2. Verify each operational claim against source, manifests, tests, or an executable command.
-3. Remove historical material that does not support the current rebuild guide.
-4. Keep `docs/rebuild_guide.md` as the canonical phased plan.
+3. Remove historical material that does not support the current engineering guide.
+4. Keep `docs/engineering-guide.md` as the canonical setup, verification, status, and phased plan.
