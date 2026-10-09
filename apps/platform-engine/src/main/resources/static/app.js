@@ -32,6 +32,38 @@ function show(id, value) {
   $(id).textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 }
 
+function renderRecentEvents(events) {
+  const body = $('recentEventsBody');
+  if (!events.length) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 5;
+    cell.textContent = 'No outbox events yet.';
+    row.append(cell);
+    body.replaceChildren(row);
+    return;
+  }
+
+  const rows = events.map((event) => {
+    const row = document.createElement('tr');
+    const values = [
+      event.eventType,
+      event.aggregateType,
+      event.createdAt ? new Date(event.createdAt).toLocaleString() : 'Unknown',
+      event.processed ? 'Published' : 'Pending',
+      String(event.retryCount)
+    ];
+    for (const value of values) {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      row.append(cell);
+    }
+    row.dataset.processed = String(event.processed);
+    return row;
+  });
+  body.replaceChildren(...rows);
+}
+
 async function refreshHealth() {
   try {
     const health = await fetch('/actuator/health');
@@ -45,16 +77,24 @@ async function refreshHealth() {
 
 async function refreshEvidence() {
   try {
-    const [outbox, hash, ledger] = await Promise.all([
+    const [outbox, hash, ledger, recentEvents] = await Promise.all([
       request('/api/v1/outbox/status'),
       request('/api/v1/ledger/latest-hash'),
-      request('/api/v1/ledger')
+      request('/api/v1/ledger'),
+      request('/api/v1/outbox/recent')
     ]);
     show('outboxResult', outbox);
     show('hashResult', hash);
     show('ledgerResult', ledger);
+    renderRecentEvents(recentEvents);
   } catch (error) {
     show('outboxResult', `Unable to load evidence: ${error.message}`);
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 5;
+    cell.textContent = `Unable to load recent events: ${error.message}`;
+    row.append(cell);
+    $('recentEventsBody').replaceChildren(row);
   }
 }
 

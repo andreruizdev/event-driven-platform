@@ -7,6 +7,7 @@ import com.eventdrivenmicroservices.platform.infrastructure.outbox.EventEnvelope
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEvent;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEventRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxProcessorService;
+import com.eventdrivenmicroservices.platform.infrastructure.observability.OutboxMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -91,10 +92,13 @@ class TraceFlowIntegrationTest {
         OutboxEventRepository repo = mock(OutboxEventRepository.class);
         @SuppressWarnings("unchecked")
         KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        when(repo.countByProcessedFalse()).thenReturn(Mono.just(1L));
+        when(repo.findFirstByProcessedFalseOrderByCreatedAtAsc()).thenReturn(Mono.just(outboxEvent));
         when(repo.save(any(OutboxEvent.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(CompletableFuture.completedFuture(null));
 
-        OutboxProcessorService outboxProcessor = new OutboxProcessorService(repo, kafkaTemplate, objectMapper);
+        OutboxProcessorService outboxProcessor = new OutboxProcessorService(
+            repo, kafkaTemplate, objectMapper, new OutboxMetrics(new SimpleMeterRegistry()));
 
         // 3. Trigger outbox publication
         when(repo.findPendingForClaim(any(Instant.class), anyInt())).thenReturn(reactor.core.publisher.Flux.just(outboxEvent));

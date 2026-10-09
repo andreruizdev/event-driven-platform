@@ -2,6 +2,8 @@ package com.eventdrivenmicroservices.platform.infrastructure.outbox;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.eventdrivenmicroservices.platform.infrastructure.observability.OutboxMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,8 @@ class OutboxProcessorServiceTest {
     private OutboxEventRepository repository;
     private KafkaTemplate<String, String> kafkaTemplate;
     private ObjectMapper objectMapper;
+    private SimpleMeterRegistry meterRegistry;
+    private OutboxMetrics metrics;
     private OutboxProcessorService processorService;
 
     @BeforeEach
@@ -33,8 +37,12 @@ class OutboxProcessorServiceTest {
         KafkaTemplate<String, String> template = mock(KafkaTemplate.class);
         kafkaTemplate = template;
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        meterRegistry = new SimpleMeterRegistry();
+        metrics = new OutboxMetrics(meterRegistry);
+        when(repository.countByProcessedFalse()).thenReturn(Mono.just(0L));
+        when(repository.findFirstByProcessedFalseOrderByCreatedAtAsc()).thenReturn(Mono.empty());
 
-        processorService = new OutboxProcessorService(repository, kafkaTemplate, objectMapper);
+        processorService = new OutboxProcessorService(repository, kafkaTemplate, objectMapper, metrics);
     }
 
     @Test
@@ -59,6 +67,8 @@ class OutboxProcessorServiceTest {
         assertEquals("agg-2", sentRecords.get(1).key());
 
         verify(repository, times(2)).save(argThat(OutboxEvent::isProcessed));
+        assertEquals(2.0, meterRegistry.counter("eventdrivenmicroservices.outbox.publish.success").count());
+        assertEquals(2L, meterRegistry.timer("eventdrivenmicroservices.outbox.publish.duration").count());
     }
 
     @Test
@@ -90,6 +100,9 @@ class OutboxProcessorServiceTest {
             && !e.isProcessed()
             && e.getRetryCount() == 1
             && e.getLockedUntil().isAfter(retryCheckStarted.plusSeconds(4))));
+        assertEquals(1.0, meterRegistry.counter("eventdrivenmicroservices.outbox.processing.failure").count());
+        assertEquals(1.0, meterRegistry.counter("eventdrivenmicroservices.outbox.retry").count());
+        assertEquals(1.0, meterRegistry.counter("eventdrivenmicroservices.outbox.publish.success").count());
     }
 
     @Test
@@ -103,6 +116,20 @@ class OutboxProcessorServiceTest {
 
         verify(kafkaTemplate, never()).send(any(ProducerRecord.class));
         verify(repository, never()).save(any(OutboxEvent.class));
+    }
+
+    @Test
+    void processOutboxEvents_UpdatesBacklogGauges() {
+        OutboxEvent oldest = createEvent("oldest-agg", "LoanApplication");
+        oldest.setCreatedAt(Instant.now().minusSeconds(12));
+        when(repository.countByProcessedFalse()).thenReturn(Mono.just(3L));
+        when(repository.findFirstByProcessedFalseOrderByCreatedAtAsc()).thenReturn(Mono.just(oldest));
+        when(repository.findPendingForClaim(any(Instant.class), eq(50))).thenReturn(Flux.empty());
+
+        processorService.processOutboxEvents();
+
+        assertEquals(3.0, meterRegistry.get("eventdrivenmicroservices.outbox.pending").gauge().value());
+        assertTrue(meterRegistry.get("eventdrivenmicroservices.outbox.oldest.pending.age.seconds").gauge().value() >= 11.0);
     }
 
     private OutboxEvent createEvent(String aggregateId, String aggregateType) {

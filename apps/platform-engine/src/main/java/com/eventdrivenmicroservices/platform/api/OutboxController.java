@@ -7,8 +7,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/outbox")
@@ -26,10 +28,26 @@ public class OutboxController {
                         .defaultIfEmpty(new OutboxStatus(pendingCount, null, 0L)));
     }
 
+    @GetMapping("/recent")
+    public Flux<OutboxEventSummary> recentEvents() {
+        return outboxEventRepository.findTop20ByOrderByCreatedAtDesc()
+                .map(event -> new OutboxEventSummary(
+                        event.getId(),
+                        event.getEventType(),
+                        event.getAggregateType(),
+                        event.getCreatedAt(),
+                        event.isProcessed(),
+                        event.getRetryCount()));
+    }
+
     private long ageInSeconds(Instant createdAt) {
         return createdAt == null ? 0L : Math.max(0L, Instant.now().getEpochSecond() - createdAt.getEpochSecond());
     }
 
     public record OutboxStatus(long pendingCount, Instant oldestCreatedAt, long oldestAgeSeconds) {
+    }
+
+    public record OutboxEventSummary(UUID id, String eventType, String aggregateType, Instant createdAt,
+                                     boolean processed, int retryCount) {
     }
 }

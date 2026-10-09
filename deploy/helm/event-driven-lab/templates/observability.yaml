@@ -133,6 +133,47 @@ data:
           "targets": [
             { "expr": "sum(rate(http_server_requests_seconds_count[1m])) by (uri, status)", "legendFormat": "{{"{{"}}uri{{"}}"}} ({{"{{"}}status{{"}}"}})" }
           ]
+        },
+        {
+          "type": "stat",
+          "title": "Pending outbox events",
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 16},
+          "targets": [
+            { "expr": "eventdrivenmicroservices_outbox_pending", "legendFormat": "Pending" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Oldest pending event age",
+          "gridPos": {"h": 6, "w": 8, "x": 8, "y": 16},
+          "targets": [
+            { "expr": "eventdrivenmicroservices_outbox_oldest_pending_age_seconds", "legendFormat": "Age (seconds)" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Outbox delivery outcomes",
+          "gridPos": {"h": 6, "w": 8, "x": 16, "y": 16},
+          "targets": [
+            { "expr": "rate(eventdrivenmicroservices_outbox_publish_success_total[5m])", "legendFormat": "Published / sec" },
+            { "expr": "rate(eventdrivenmicroservices_outbox_processing_failure_total[5m])", "legendFormat": "Failures / sec" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Outbox retries",
+          "gridPos": {"h": 6, "w": 12, "x": 0, "y": 22},
+          "targets": [
+            { "expr": "rate(eventdrivenmicroservices_outbox_retry_total[5m])", "legendFormat": "Retries / sec" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Outbox publish acknowledgement p95",
+          "gridPos": {"h": 6, "w": 12, "x": 12, "y": 22},
+          "targets": [
+            { "expr": "histogram_quantile(0.95, sum(rate(eventdrivenmicroservices_outbox_publish_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95 seconds" }
+          ]
         }
       ]
     }

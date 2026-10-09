@@ -8,10 +8,12 @@ Last checked: 2026-10-09.
 
 | Area | Current evidence |
 |---|---|
-| Java build and tests | `./gradlew test --no-daemon` succeeds: 34 tests, 32 passed, 2 skipped, 0 failures. |
+| Java build and tests | `./gradlew test --no-daemon` succeeds: 36 tests, 34 passed, 2 skipped, 0 failures. |
 | Fast behavior tests | Controller, service, anomaly, outbox, JWT signature/configuration, and architecture tests pass. |
-| PostgreSQL/Kafka integration | Not established by that run. `IntegrationTests` and `E2EOutboxIntegrationTest` skipped because Docker-backed Testcontainers were unavailable. |
-| Helm | `helm lint` and `helm template` pass for `deploy/helm/event-driven-lab`. |
+| Outbox observability | Pending count/age gauges, publish/failure/retry counters, latency histogram, and payload-free recent-event summaries are implemented and covered by unit/controller tests. |
+| Control room | Updated HTML, CSS, and JavaScript were served from the current local Spring process; `/api/v1/outbox/recent` returned HTTP 200 with Basic authentication. No browser automation or JavaScript runtime is installed in this container. |
+| PostgreSQL/Kafka integration | Not established by the latest local run. `IntegrationTests` and `E2EOutboxIntegrationTest` skipped because Docker-backed tests were unavailable. CI now provides a health-checked PostgreSQL service, prioritizes its connection settings, and fails if either report is missing or skipped; a GitHub Actions run is still required to verify the fix. |
+| Helm and Grafana | `helm lint` and `helm template` pass for `deploy/helm/event-driven-lab`, including the new outbox panels. Live dashboard queries have not been verified against a deployed current checkout. |
 | Kind | Twelve application-stack pods were Ready in the existing cluster, but they predated the current checkout; no fresh deployment was verified. |
 | Full business workflow | Not verified. `scripts/demo.sh` submits requests and prints responses but does not assert Kafka delivery, anomaly results, ledger integrity, or trace visibility. |
 
@@ -56,7 +58,7 @@ cd apps/platform-engine
 ./gradlew test --no-daemon
 ```
 
-The current `IntegrationTests` is a context-load smoke test. `E2EOutboxIntegrationTest` posts a loan and checks that an unprocessed outbox record exists; it does not assert Kafka publication or consumer behavior. Expand these before treating database/outbox/Kafka integration as proven.
+`IntegrationTests` now performs `SELECT 1` through the configured R2DBC `DatabaseClient`. `E2EOutboxIntegrationTest` posts a loan and checks that an unprocessed outbox record exists; it does not assert Kafka publication or consumer behavior. Both tests prefer explicit `SPRING_R2DBC_*` and `SPRING_FLYWAY_*` endpoints when provided, with runtime-mapped Testcontainers URLs as the local fallback. The GitHub Actions test job supplies a health-checked PostgreSQL service on port 5432 and fails if these test reports are missing or skipped. Expand the workflow assertions before treating Kafka/outbox delivery as fully verified.
 
 ### Deployment and workflow evidence
 
@@ -65,7 +67,7 @@ Helm lint/render checks establish template validity, not pod health. A fresh dep
 ## Prioritized Work
 
 1. **Prove anomaly behavior on both state backends.** The in-memory detector now scores against prior samples, and the control-room regression passes. Add Redis-backed tests for warmup, eviction, concurrent readings, and fallback behavior; assert that the documented UI sequence flags its outlier.
-2. **Prove the event path under failure.** Keep the scheduled application relay as the current primary path unless the project explicitly switches to Debezium. The Helm chart contains a Debezium Connect deployment/configuration, but the connector is not registered by the current scripts. Add PostgreSQL/Kafka integration coverage for atomic writes, retry/backoff, duplicate delivery, alert-send failure, and processed-state transitions. Parse the event envelope rather than routing by arbitrary serialized-text matches.
+2. **Prove the event path under failure.** Outbox metrics, a payload-free recent-event endpoint, and Grafana panels are now implemented. Keep the scheduled application relay as the current primary path unless the project explicitly switches to Debezium. The Helm chart contains a Debezium Connect deployment/configuration, but the connector is not registered by the current scripts. Add PostgreSQL/Kafka integration coverage for atomic writes, retry/backoff, duplicate delivery, alert-send failure, and processed-state transitions. Parse the event envelope rather than routing by arbitrary serialized-text matches.
 3. **Close trust and data-lifecycle gaps.** JWT HMAC comparison is constant-time and `k8s`/`prod` now fail startup without a configured key; implement and test JWT algorithm/claim/expiry validation. Add PostgreSQL persistence to the local chart, ledger integrity verification and append-only enforcement, and integration tests for concurrent appends and telemetry/outbox retention boundaries.
 4. **Verify observability end to end.** Prove one trace from HTTP through outbox, Kafka, anomaly, and ledger in Tempo. Validate metric names and dashboard queries against emitted metrics; current instrumentation/configuration is not live evidence.
 5. **Refresh the local deployment and CI evidence.** Deploy the current checkout to Kind, assert workload readiness and health, and make CI fail when Docker-backed tests are skipped unexpectedly or when the demo assertions fail.

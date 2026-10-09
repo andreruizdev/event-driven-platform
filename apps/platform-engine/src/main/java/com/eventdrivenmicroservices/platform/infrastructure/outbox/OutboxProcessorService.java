@@ -2,6 +2,7 @@ package com.eventdrivenmicroservices.platform.infrastructure.outbox;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.eventdrivenmicroservices.platform.infrastructure.observability.OutboxMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -21,6 +22,7 @@ public class OutboxProcessorService {
     private final OutboxEventRepository outboxEventRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final OutboxMetrics metrics;
     private final String instanceId = "instance-" + UUID.randomUUID();
 
     private static final Duration LOCK_DURATION = Duration.ofSeconds(30);
@@ -28,10 +30,12 @@ public class OutboxProcessorService {
 
     public OutboxProcessorService(OutboxEventRepository outboxEventRepository,
                                   @Autowired(required = false) KafkaTemplate<String, String> kafkaTemplate,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper,
+                                  OutboxMetrics metrics) {
         this.outboxEventRepository = outboxEventRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
+        this.metrics = metrics;
     }
 
     @Scheduled(fixedDelay = 5000)
@@ -39,7 +43,8 @@ public class OutboxProcessorService {
         Instant now = Instant.now();
         Instant lockUntil = now.plus(LOCK_DURATION);
 
-        outboxEventRepository.findPendingForClaim(now, 50)
+        refreshBacklog()
+            .thenMany(outboxEventRepository.findPendingForClaim(now, 50))
                 .concatMap(event ->
                         outboxEventRepository.claimLock(event.getId(), instanceId, lockUntil, now)
                                 .flatMap(rowsUpdated -> {
@@ -53,11 +58,23 @@ public class OutboxProcessorService {
                                     return Mono.empty();
                                 })
                 )
+                .doOnError(error -> log.error("Failed to refresh or process the outbox batch", error))
                 .subscribe();
     }
 
+            private Mono<Void> refreshBacklog() {
+            return outboxEventRepository.countByProcessedFalse()
+                .defaultIfEmpty(0L)
+                .flatMap(pendingCount -> outboxEventRepository.findFirstByProcessedFalseOrderByCreatedAtAsc()
+                    .map(oldest -> Math.max(0L, Instant.now().getEpochSecond() - oldest.getCreatedAt().getEpochSecond()))
+                    .defaultIfEmpty(0L)
+                    .doOnNext(oldestAge -> metrics.updateBacklog(pendingCount, oldestAge)))
+                .then();
+            }
+
     private Mono<OutboxEvent> recordFailure(OutboxEvent event, Throwable error) {
         log.error("Failed to process outbox event: {}", event.getId(), error);
+        metrics.recordProcessingFailure();
         event.setRetryCount(event.getRetryCount() + 1);
         long delaySeconds = Math.min(5L << Math.min(event.getRetryCount() - 1, 6), MAX_RETRY_DELAY.toSeconds());
         String errorMsg = error.getMessage();
@@ -78,7 +95,10 @@ public class OutboxProcessorService {
             if (event.getTraceparent() != null && !event.getTraceparent().isBlank()) {
                 record.headers().add("traceparent", event.getTraceparent().getBytes(java.nio.charset.StandardCharsets.UTF_8));
             }
-            return Mono.fromFuture(kafkaTemplate.send(record))
+                Instant publishStarted = Instant.now();
+                return Mono.fromFuture(kafkaTemplate.send(record))
+                    .doOnSuccess(result -> metrics.recordPublishSuccess())
+                    .doFinally(signal -> metrics.recordPublishDuration(Duration.between(publishStarted, Instant.now())))
                     .thenReturn(event)
                     .doOnError(err -> log.error("Failed to publish outbox event to Kafka: {}", event.getId(), err));
         } else {

@@ -11,8 +11,10 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
 
 import java.time.Instant;
+import java.util.UUID;
 
 import static org.mockito.Mockito.when;
 
@@ -45,5 +47,27 @@ class OutboxControllerTest {
                 .jsonPath("$.pendingCount").isEqualTo(2)
                 .jsonPath("$.oldestCreatedAt").isNotEmpty()
                 .jsonPath("$.oldestAgeSeconds").value(age -> org.junit.jupiter.api.Assertions.assertTrue(((Number) age).longValue() > 0L));
+    }
+
+    @Test
+    void returnsRecentEventSummariesWithoutPayloads() {
+        OutboxEvent event = new OutboxEvent();
+        event.setId(UUID.randomUUID());
+        event.setEventType("TransactionAnomalyDetected");
+        event.setAggregateType("FinancialTransaction");
+        event.setCreatedAt(Instant.now());
+        event.setPayload("sensitive-payload");
+        event.setRetryCount(1);
+        when(outboxEventRepository.findTop20ByOrderByCreatedAtDesc()).thenReturn(Flux.just(event));
+
+        webTestClient.get()
+                .uri("/api/v1/outbox/recent")
+                .headers(headers -> headers.setBasicAuth("admin", "test"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$[0].eventType").isEqualTo("TransactionAnomalyDetected")
+                .jsonPath("$[0].retryCount").isEqualTo(1)
+                .jsonPath("$[0].payload").doesNotExist();
     }
 }

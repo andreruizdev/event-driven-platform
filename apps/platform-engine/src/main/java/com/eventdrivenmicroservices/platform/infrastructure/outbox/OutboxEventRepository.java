@@ -13,6 +13,7 @@ import java.time.Instant;
 
 public interface OutboxEventRepository extends ReactiveCrudRepository<OutboxEvent, UUID> {
     Flux<OutboxEvent> findByProcessedFalse();
+    Flux<OutboxEvent> findTop20ByOrderByCreatedAtDesc();
 
     @Query("SELECT * FROM outbox_events WHERE processed = false AND (locked_until IS NULL OR locked_until < :now) ORDER BY created_at ASC LIMIT :limit")
     Flux<OutboxEvent> findPendingForClaim(@Param("now") Instant now, @Param("limit") int limit);
