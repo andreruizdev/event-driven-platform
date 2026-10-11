@@ -7,7 +7,9 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.time.Instant;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -27,6 +29,60 @@ class SecurityConfigTest {
     }
 
     @Test
+    void rejectsExpiredMissingExpiryAndNotYetValidTokens() throws Exception {
+        long now = Instant.now().getEpochSecond();
+
+        assertFalse(securityConfig.validateJwtToken(token(SECRET, "HS256", "{\"sub\":\"a\",\"exp\":" + (now - 3600) + "}"), SECRET));
+        assertFalse(securityConfig.validateJwtToken(token(SECRET, "HS256", "{\"sub\":\"a\"}"), SECRET));
+        assertFalse(securityConfig.validateJwtToken(token(SECRET, "HS256", "{\"sub\":\"a\",\"exp\":\"later\"}"), SECRET));
+        assertFalse(securityConfig.validateJwtToken(
+                token(SECRET, "HS256", "{\"sub\":\"a\",\"exp\":" + (now + 3600) + ",\"nbf\":" + (now + 3600) + "}"), SECRET));
+    }
+
+    @Test
+    void toleratesSmallClockSkew() throws Exception {
+        long now = Instant.now().getEpochSecond();
+
+        assertTrue(securityConfig.validateJwtToken(token(SECRET, "HS256", "{\"exp\":" + (now - 5) + "}"), SECRET));
+    }
+
+    @Test
+    void rejectsNonHs256AlgorithmsIncludingNone() throws Exception {
+        String claims = validClaims();
+
+        assertFalse(securityConfig.validateJwtToken(token(SECRET, "none", claims), SECRET));
+        assertFalse(securityConfig.validateJwtToken(token(SECRET, "HS512", claims), SECRET));
+        assertFalse(securityConfig.validateJwtToken(encode("{\"alg\":\"none\"}") + "." + encode(claims) + ".", SECRET));
+    }
+
+    @Test
+    void enforcesConfiguredIssuerAndAudience() throws Exception {
+        ReflectionTestUtils.setField(securityConfig, "jwtIssuer", "edge-issuer");
+        ReflectionTestUtils.setField(securityConfig, "jwtAudience", "platform-engine");
+        long exp = Instant.now().getEpochSecond() + 3600;
+
+        assertTrue(securityConfig.validateJwtToken(token(SECRET, "HS256",
+                "{\"iss\":\"edge-issuer\",\"aud\":\"platform-engine\",\"exp\":" + exp + "}"), SECRET));
+        assertTrue(securityConfig.validateJwtToken(token(SECRET, "HS256",
+                "{\"iss\":\"edge-issuer\",\"aud\":[\"other\",\"platform-engine\"],\"exp\":" + exp + "}"), SECRET));
+        assertFalse(securityConfig.validateJwtToken(token(SECRET, "HS256",
+                "{\"iss\":\"someone-else\",\"aud\":\"platform-engine\",\"exp\":" + exp + "}"), SECRET));
+        assertFalse(securityConfig.validateJwtToken(token(SECRET, "HS256",
+                "{\"iss\":\"edge-issuer\",\"aud\":\"other\",\"exp\":" + exp + "}"), SECRET));
+        assertFalse(securityConfig.validateJwtToken(token(SECRET, "HS256", "{\"exp\":" + exp + "}"), SECRET));
+    }
+
+    @Test
+    void usesSubjectAsPrincipalWithFallback() throws Exception {
+        long exp = Instant.now().getEpochSecond() + 3600;
+
+        assertEquals("sensor-7", securityConfig.authenticatedSubject(
+                token(SECRET, "HS256", "{\"sub\":\"sensor-7\",\"exp\":" + exp + "}"), SECRET, Instant.now()));
+        assertEquals("eventdrivenmicroservices-edge-node", securityConfig.authenticatedSubject(
+                token(SECRET, "HS256", "{\"exp\":" + exp + "}"), SECRET, Instant.now()));
+    }
+
+    @Test
     void deployedProfilesRequireJwtSecret() {
         ReflectionTestUtils.setField(securityConfig, "activeProfiles", "dev,k8s");
         assertThrows(IllegalStateException.class, securityConfig::validateJwtConfiguration);
@@ -42,7 +98,15 @@ class SecurityConfigTest {
     }
 
     private String token(String secret) throws Exception {
-        String headerAndPayload = encode("{\"alg\":\"HS256\"}") + "." + encode("{\"sub\":\"test\"}");
+        return token(secret, "HS256", validClaims());
+    }
+
+    private String validClaims() {
+        return "{\"sub\":\"test\",\"exp\":" + (Instant.now().getEpochSecond() + 3600) + "}";
+    }
+
+    private String token(String secret, String alg, String claims) throws Exception {
+        String headerAndPayload = encode("{\"alg\":\"" + alg + "\"}") + "." + encode(claims);
         Mac hmac = Mac.getInstance("HmacSHA256");
         hmac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
         String signature = Base64.getUrlEncoder().withoutPadding()

@@ -1,5 +1,7 @@
 package com.eventdrivenmicroservices.platform.security;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -25,6 +27,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.Arrays;
 import java.util.Collections;
@@ -33,8 +36,20 @@ import java.util.Collections;
 @EnableWebFluxSecurity
 public class SecurityConfig {
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String DEFAULT_SUBJECT = "eventdrivenmicroservices-edge-node";
+
     @Value("${JWT_SECRET_KEY:#{null}}")
     private String jwtSecretKey;
+
+    @Value("${JWT_ISSUER:#{null}}")
+    private String jwtIssuer;
+
+    @Value("${JWT_AUDIENCE:#{null}}")
+    private String jwtAudience;
+
+    @Value("${JWT_CLOCK_SKEW_SECONDS:30}")
+    private long clockSkewSeconds = 30;
 
     @Value("${spring.profiles.active:}")
     private String activeProfiles;
@@ -77,10 +92,11 @@ public class SecurityConfig {
         return (ServerWebExchange exchange, WebFilterChain chain) -> {
             String authHeader = exchange.getRequest().getHeaders().getFirst("Authorization");
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
-                String token = authHeader.substring(7);
-                if (validateJwtToken(token, jwtSecretKey)) {
+                String subject = authenticatedSubject(authHeader.substring(7), jwtSecretKey, Instant.now());
+                if (subject != null) {
+                    // Bearer tokens identify edge nodes only; they never carry operator/ADMIN authorities.
                     UsernamePasswordAuthenticationToken authentication =
-                            new UsernamePasswordAuthenticationToken("eventdrivenmicroservices-edge-node", null, Collections.emptyList());
+                            new UsernamePasswordAuthenticationToken(subject, null, Collections.emptyList());
                     return chain.filter(exchange)
                             .contextWrite(ReactiveSecurityContextHolder.withSecurityContext(Mono.just(new SecurityContextImpl(authentication))));
                 }
@@ -90,19 +106,55 @@ public class SecurityConfig {
     }
 
     boolean validateJwtToken(String token, String secret) {
-        if (secret == null || secret.isBlank()) return false;
+        return authenticatedSubject(token, secret, Instant.now()) != null;
+    }
+
+    /**
+     * Returns the token subject when the token is a valid HS256 JWT, or null otherwise. Requires a verified
+     * signature, an unexpired {@code exp}, a reached {@code nbf} when present, and the configured
+     * issuer/audience when those are set.
+     */
+    String authenticatedSubject(String token, String secret, Instant now) {
+        if (secret == null || secret.isBlank() || token == null) return null;
         try {
-            String[] parts = token.split("\\.");
-            if (parts.length != 3) return false;
-            String headerAndPayload = parts[0] + "." + parts[1];
+            String[] parts = token.split("\\.", -1);
+            if (parts.length != 3) return null;
+
+            JsonNode header = JSON.readTree(Base64.getUrlDecoder().decode(parts[0]));
+            if (!"HS256".equals(header.path("alg").asText())) return null;
+
             Mac sha256Hmac = Mac.getInstance("HmacSHA256");
-            SecretKeySpec secretKey = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
-            sha256Hmac.init(secretKey);
-            byte[] signatureBytes = sha256Hmac.doFinal(headerAndPayload.getBytes(StandardCharsets.UTF_8));
-            byte[] providedSignature = Base64.getUrlDecoder().decode(parts[2]);
-            return MessageDigest.isEqual(signatureBytes, providedSignature);
+            sha256Hmac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] expected = sha256Hmac.doFinal((parts[0] + "." + parts[1]).getBytes(StandardCharsets.UTF_8));
+            if (!MessageDigest.isEqual(expected, Base64.getUrlDecoder().decode(parts[2]))) return null;
+
+            JsonNode claims = JSON.readTree(Base64.getUrlDecoder().decode(parts[1]));
+            long nowSeconds = now.getEpochSecond();
+            JsonNode exp = claims.path("exp");
+            if (!exp.isNumber() || nowSeconds - clockSkewSeconds >= exp.asLong()) return null;
+            JsonNode nbf = claims.path("nbf");
+            if (nbf.isNumber() && nowSeconds + clockSkewSeconds < nbf.asLong()) return null;
+            if (hasText(jwtIssuer) && !jwtIssuer.equals(claims.path("iss").asText())) return null;
+            if (hasText(jwtAudience) && !audienceMatches(claims.path("aud"), jwtAudience)) return null;
+
+            String subject = claims.path("sub").asText("");
+            return subject.isBlank() ? DEFAULT_SUBJECT : subject;
         } catch (Exception e) {
-            return false;
+            return null;
         }
+    }
+
+    private static boolean audienceMatches(JsonNode aud, String expected) {
+        if (aud.isTextual()) return expected.equals(aud.asText());
+        if (aud.isArray()) {
+            for (JsonNode value : aud) {
+                if (expected.equals(value.asText())) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }

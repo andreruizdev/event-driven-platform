@@ -42,7 +42,7 @@ flowchart TD
 1. **`apps/platform-engine` (Java 21 / Spring Boot 3 / WebFlux / R2DBC)**:
    - Non-blocking reactive HTTP ingestion API.
    - **Streaming Anomaly Detection Engine**: In-memory sliding window calculating transaction velocity bursts and telemetry Z-Score metric outliers.
-   - **Transactional Outbox Pattern**: Persists domain entities (`loan_applications`, `telemetry_events`, `financial_transactions`) alongside `outbox_events` and append-only cryptographic `ledger_events` using PostgreSQL R2DBC.
+   - **Transactional Outbox Pattern**: Persists domain entities (`loan_applications`, `telemetry_events`, `financial_transactions`) alongside `outbox_events` and trigger-protected, hash-chained `ledger_events` (verify via `GET /api/v1/ledger/verify`) using PostgreSQL R2DBC.
    - **Outbox Publisher**: `OUTBOX_PUBLISHER_MODE=poller` (default) runs a leased, retrying scheduled relay; `cdc` runs the Debezium bridge instead. The two are mutually exclusive.
    - **Kafka Listener**: Validates the version-1 envelope, routes anomaly event types, durably records an alert intent in `anomaly_alert_outbox` (idempotent on redelivery), and sends malformed records to the `.DLT` topic. A relay publishes intents to `eventdrivenmicroservices-anomaly-alerts` with backoff.
 
@@ -59,7 +59,7 @@ flowchart TD
   - **Telemetry Z-Score Outlier**: Computes rolling mean ($\mu$) and standard deviation ($\sigma$) to flag statistical outliers ($Z = \frac{|x-\mu|}{\sigma} > 3.0$).
 - **Transactional Outbox Pattern**: Enforces dual-write consistency by persisting business state and event records in a single database transaction prior to asynchronous Kafka publishing.
 - **Reactive Non-Blocking Core**: Built on Spring WebFlux, Project Reactor, and R2DBC to maximize vertical I/O throughput without thread-per-request bottlenecks.
-- **Cryptographic Ledger**: SHA-256 hash-chained append-only `ledger_events` table for tamper-evident transaction history.
+- **Cryptographic Ledger**: SHA-256 hash-chained `ledger_events` table, serialized by an advisory lock, immutable via database triggers, with an on-demand verification endpoint.
 - **Debezium (opt-in)**: Helm deploys Connect and a registration Job. CDC-to-envelope delivery and a connector restart were verified in Kind (CI `cdc-drill`); the default publisher remains the scheduled relay until Connect pod loss and bridge-crash replay are also proven (see the engineering guide).
 - **Distributed Tracing & Monitoring**: OpenTelemetry (OTLP) metrics and trace exemplars routed to Prometheus and Grafana Tempo via the OTel Collector.
 - **Kubernetes Deployment Hardening**: Security contexts (non-root, read-only filesystem), init containers for dependency readiness, and HPA autoscaling.
@@ -116,13 +116,14 @@ Run the single entry-point script to validate the toolchain, run Gradle tests, p
 
 ## Current Limitations
 
-- The project is a modular monolith. The scheduled outbox relay is the default publisher; Debezium CDC is opt-in; connector restart is CI-verified, while Connect pod loss and bridge-crash replay are not yet proven.
+- The project is a modular monolith. The scheduled outbox relay is the default publisher; Debezium CDC is opt-in. Connector restart is CI-verified; Connect pod loss and bridge-crash replay are not yet proven.
 - Delivery is at-least-once with idempotent consumer effects, not exactly-once.
-- The bearer-token check validates only the HMAC signature (no expiry/claims yet).
-- Duplicate-delivery E2E tests need a Docker daemon compatible with the pinned Testcontainers; they are skipped locally when it is not.
+- Bearer tokens are validated for HS256 signature, `exp`, `nbf`, and optional issuer/audience (`JWT_ISSUER`, `JWT_AUDIENCE`) and grant no authorities. There is no key rotation (`kid`), no token issuer, and no HTTP-level bearer filter test yet.
+- The ledger is hash-chained, serialized with an advisory lock, protected by database triggers that reject UPDATE/DELETE/TRUNCATE, and checkable via `GET /api/v1/ledger/verify`. Verification reads the whole table (no pagination or checkpoints), and a database superuser can still disable the triggers.
+- Telemetry retention drops whole expired monthly partitions and row-deletes expired rows in the current partition, so the 7-day default is not a pure cold delete. There is no multi-replica leader election for the job.
+- The Helm PostgreSQL workload uses a PersistentVolumeClaim (durability drill passes in CI) but is a single replica with no backups or HA. The chart is a local lab deployment, not a production-ready data platform.
+- The Docker-backed E2E tests need a Docker daemon compatible with the pinned Testcontainers. If your daemon requires a newer API version, set `api.version=1.44` in `~/.docker-java.properties`; otherwise they are skipped locally and CI runs them.
 - Trace headers are handled in some paths, but a complete live HTTP-to-Kafka-to-ledger trace has not been verified.
-- The ledger is hash-chained, but database-level append-only enforcement and a full integrity verification operation are not implemented.
-- The Helm PostgreSQL workload has no persistent volume. The chart is a local lab deployment, not a production-ready data platform.
 - `local-dev-password` is a local fallback credential only. Provide runtime secrets explicitly and do not reuse these credentials outside a disposable development environment.
 
 ## Five-Minute Demo

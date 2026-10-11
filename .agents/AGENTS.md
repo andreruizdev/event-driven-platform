@@ -14,7 +14,7 @@ These guidelines apply to code, deployment manifests, documentation, and automat
 * **Non-Blocking Java Backend**: Any Spring Boot endpoints MUST follow the reactive non-blocking pattern established with Spring WebFlux, Project Reactor, and R2DBC (`platform-engine`). Do not introduce blocking I/O (e.g. synchronous JDBC/Hibernate, `Thread.sleep()`, or `.block()` calls) within request threads.
 * **Transactional Outbox Pattern**: Dual-writes (persisting domain state alongside event outbox records) MUST occur within a single atomic database transaction before asynchronous publishing to Kafka.
 * **Observability**: Prefer the configured OpenTelemetry collector for metrics and traces. Keep any direct Prometheus scrape path deliberate and documented.
-* **Immutable Ledger Integrity**: Never write `UPDATE` or `DELETE` SQL statements against the `ledger_events` table. All modifications to the ledger must be append-only with SHA-256 hash-chaining.
+* **Immutable Ledger Integrity**: Never write `UPDATE` or `DELETE` SQL statements against the `ledger_events` table. All modifications to the ledger must be append-only with SHA-256 hash-chaining. The database enforces this with triggers (V5); use `GET /api/v1/ledger/verify` to check the chain.
 * **Cold Deletes via Partitioning**: High-volume data streams (like `telemetry_events`) must not use massive transactional `DELETE` queries. Always utilize PostgreSQL Table Partitioning (`PARTITION BY RANGE`) for zero-downtime partition dropping.
 
 ---

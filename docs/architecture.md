@@ -50,7 +50,7 @@ flowchart TD
 
 ## 2. Ingestion & API Layer
 
-The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom HMAC Bearer-token check. The token check verifies the signature but does not currently validate standard JWT claims, algorithm, or expiry, and grants no authorities (only the fixed `eventdrivenmicroservices-edge-node` principal).
+The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom HMAC Bearer-token check. Bearer tokens must be HS256 JWTs with a valid signature, a numeric `exp` (30 s clock skew), an optional `nbf`, and, when `JWT_ISSUER` / `JWT_AUDIENCE` are set, matching `iss` / `aud`. The `sub` claim becomes the principal (default `eventdrivenmicroservices-edge-node`). Bearer tokens grant no authorities, so they can call authenticated ingestion endpoints but never the `ADMIN`-only `/actuator/**`. There is no key rotation or token issuer.
 
 * `POST /api/v1/loans`: Ingests loan origination applications, validates applicant UUIDs and dynamic loan tier properties, persists the loan, creates an outbox event, and appends an `ApplicationSubmitted` record to the SHA-256 ledger.
 * `POST /api/v1/transactions`: Ingests financial transactions, evaluates real-time sliding-window velocity thresholds, and dual-writes transaction state with outbox events.
@@ -96,7 +96,9 @@ The ledger stores hash-linked records for loan submissions and selected anomaly 
 * **Genesis Hash:** Rooted at deterministic `64-zero` SHA-256 string (`0000000000000000000000000000000000000000000000000000000000000000`).
 * **Hash Chaining:** Each record calculates:
   $$\text{current\_hash} = \text{SHA-256}(\text{previous\_hash} + \text{transaction\_type} + \text{payload})$$
-* **Current limitation:** A unique index on `previous_hash` prevents forks, but no database trigger prevents update/delete and no integrity-verification API exists. Hash linkage is implemented; enforced immutability and automated tamper detection are not.
+* **Serialized appends:** `appendToLedger` takes a transaction-scoped PostgreSQL advisory lock before reading the head, so concurrent appends (including across replicas) form one chain. A unique `seq` identity column (migration `V5`) defines chain order; `created_at` is not used for ordering.
+* **Append-only enforcement:** database triggers reject `UPDATE`, `DELETE`, and `TRUNCATE` on `ledger_events`. A unique index on `previous_hash` additionally prevents forks. A database superuser can still disable triggers, so this deters application-level mutation rather than a privileged attacker.
+* **Verification:** `GET /api/v1/ledger/verify` recomputes every hash and link in append order. It reads the whole table, so it needs pagination or checkpoints at scale, and it detects tampering only after the fact. Retention of ledger rows must be designed around the append-only triggers.
 
 ---
 
@@ -118,6 +120,6 @@ The local lab stack is packaged in the canonical Helm chart `deploy/helm/event-d
 * **Prometheus:** Metrics scraping endpoint monitoring throughput, JVM metrics, and custom anomaly counters.
 * **Grafana Loki:** Centralized log aggregation across all Kubernetes pods.
 * **Grafana:** Dashboards pre-provisioned with Prometheus, Tempo, and Loki datasources.
-* **Local deployment status:** The platform container runs non-root with a read-only root filesystem and external database/JWT secret references. PostgreSQL is a single-replica Deployment without a persistent volume; several infrastructure images use `latest`, and not all pods have probes or equivalent hardening. Treat this chart as a local lab, not production-ready deployment configuration.
+* **Local deployment status:** The platform container runs non-root with a read-only root filesystem and external database/JWT secret references. PostgreSQL is a single-replica Deployment backed by a PersistentVolumeClaim (`postgres.persistence`, default 5Gi; a pod-replacement durability drill passes in CI) but has no backups or HA; several infrastructure images use `latest`, and not all pods have probes or equivalent hardening. Treat this chart as a local lab, not production-ready deployment configuration.
 Current verification evidence and implementation priorities live in [engineering-guide.md](engineering-guide.md).
 
