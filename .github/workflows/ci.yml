@@ -153,6 +153,15 @@ jobs:
           kubectl wait --for=condition=ready pod --all --namespace event-driven-lab --timeout=300s
           kubectl rollout status deployment/platform-engine --namespace event-driven-lab --timeout=300s
 
+      - name: Run PostgreSQL durability drill
+        run: ./scripts/postgres-durability-drill.sh
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods,pvc -n event-driven-lab
+          kubectl logs -n event-driven-lab deploy/eventdrivenmicroservices-postgres --tail=100 || true
+
   cdc-drill:
     name: Debezium CDC Drill (Kind)
     runs-on: ubuntu-latest

@@ -236,6 +236,40 @@ public class E2EOutboxIntegrationTest {
     @Autowired
     private com.eventdrivenmicroservices.platform.application.LedgerService ledgerService;
 
+    @Autowired
+    private com.eventdrivenmicroservices.platform.application.DataComplianceService dataComplianceService;
+
+    @Test
+    void retentionDropsExpiredPartitionsDeletesExpiredRowsAndKeepsRecentData() {
+        databaseClient.sql("CREATE TABLE IF NOT EXISTS telemetry_events_y2020m01 PARTITION OF telemetry_events "
+                        + "FOR VALUES FROM ('2020-01-01 00:00:00+00') TO ('2020-02-01 00:00:00+00')")
+                .then().block(Duration.ofSeconds(5));
+        String insert = "INSERT INTO telemetry_events (device_id, timestamp, log_level, raw_payload) "
+                + "VALUES ('retention-drill', '%s', 'INFO', '{}')";
+        databaseClient.sql(insert.formatted("2020-01-15 00:00:00+00")).then().block(Duration.ofSeconds(5));
+        databaseClient.sql(insert.formatted("2019-06-15 00:00:00+00")).then().block(Duration.ofSeconds(5));
+        databaseClient.sql(insert.formatted(java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC))).then()
+                .block(Duration.ofSeconds(5));
+
+        dataComplianceService.executeDataPurge().block(Duration.ofSeconds(30));
+
+        Long expiredPartitions = databaseClient.sql(
+                        "SELECT count(*) AS c FROM pg_class WHERE relname = 'telemetry_events_y2020m01'")
+                .map((row, meta) -> row.get("c", Long.class)).one().block(Duration.ofSeconds(5));
+        Long remaining = databaseClient.sql(
+                        "SELECT count(*) AS c FROM telemetry_events WHERE device_id = 'retention-drill'")
+                .map((row, meta) -> row.get("c", Long.class)).one().block(Duration.ofSeconds(5));
+        Long futurePartitions = databaseClient.sql(
+                        "SELECT count(*) AS c FROM pg_class WHERE relname = 'telemetry_events_y"
+                                + java.time.YearMonth.now(java.time.ZoneOffset.UTC).plusMonths(3)
+                                        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy'm'MM")) + "'")
+                .map((row, meta) -> row.get("c", Long.class)).one().block(Duration.ofSeconds(5));
+
+        Assertions.assertEquals(0L, expiredPartitions);
+        Assertions.assertEquals(1L, remaining);
+        Assertions.assertEquals(1L, futurePartitions);
+    }
+
     @Test
     void concurrentLedgerAppendsKeepAVerifiableChainAndRejectMutation() {
         long before = ledgerEventRepository.count().block(Duration.ofSeconds(5));

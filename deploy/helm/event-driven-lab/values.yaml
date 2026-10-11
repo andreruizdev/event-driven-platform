@@ -25,3 +25,8 @@ platformEngine:
     minReplicas: 1
     maxReplicas: 5
     targetCPUUtilizationPercentage: 75
+
+postgres:
+  persistence:
+    enabled: true
+    size: 5Gi
