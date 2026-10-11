@@ -152,3 +152,49 @@ jobs:
           kubectl get pods -n event-driven-lab
           kubectl wait --for=condition=ready pod --all --namespace event-driven-lab --timeout=300s
           kubectl rollout status deployment/platform-engine --namespace event-driven-lab --timeout=300s
+
+  cdc-drill:
+    name: Debezium CDC Drill (Kind)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create k8s Kind Cluster
+        uses: helm/kind-action@v1.8.0
+        with:
+          cluster_name: eventdrivenmicroservices-cluster
+
+      - name: Build and Load Image
+        run: |
+          docker build -t platform-engine:local ./apps/platform-engine
+          kind load docker-image platform-engine:local --name eventdrivenmicroservices-cluster
+
+      - name: Deploy Helm Chart in CDC mode
+        run: |
+          kubectl create namespace event-driven-lab --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic eventdrivenmicroservices-secrets \
+            --from-literal=POSTGRES_PASSWORD=test \
+            --from-literal=DEBEZIUM_PASSWORD=test-debezium \
+            --from-literal=JWT_SECRET_KEY=test-secret-for-ci-only \
+            --from-literal=GF_SECURITY_ADMIN_PASSWORD=test \
+            --namespace event-driven-lab \
+            --dry-run=client -o yaml | kubectl apply -f -
+          helm upgrade --install event-driven-lab ./deploy/helm/event-driven-lab \
+            --namespace event-driven-lab \
+            --set outbox.publisher.mode=cdc \
+            --set platformEngine.image.repository=platform-engine \
+            --set platformEngine.image.pullPolicy=Never \
+            --set platformEngine.image.tag=local \
+            --wait --timeout=300s
+          kubectl rollout status deployment/platform-engine --namespace event-driven-lab --timeout=300s
+
+      - name: Run CDC restart drill
+        run: ./scripts/cdc-drill.sh
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -n event-driven-lab
+          kubectl logs -n event-driven-lab deploy/platform-engine --tail=200 || true
+          kubectl logs -n event-driven-lab deploy/eventdrivenmicroservices-debezium --tail=200 || true
