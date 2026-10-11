@@ -58,6 +58,30 @@ class AnomalyEventListenerTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void redeliveryAfterIntentCommitKeepsTheSameEventIdempotent() throws Exception {
+        AnomalyAlertOutboxRepository repository = mock(AnomalyAlertOutboxRepository.class);
+        KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+        when(repository.insertIfAbsent(any(UUID.class), any(String.class), any(String.class),
+                any(String.class), any(Instant.class)))
+                .thenReturn(Mono.just(1), Mono.just(0));
+        ObjectMapper objectMapper = objectMapper();
+        AnomalyEventListener listener = new AnomalyEventListener(objectMapper, kafkaTemplate, repository);
+        ConsumerRecord<String, String> record = new ConsumerRecord<>(
+                "eventdrivenmicroservices-outbox-events", 0, 17L, "aggregate-1",
+                envelope(objectMapper, "TransactionAnomalyDetected", "{}"));
+
+        listener.consumeOutboxEvent(record);
+        listener.consumeOutboxEvent(record);
+
+        var envelopeCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(repository, org.mockito.Mockito.times(2)).insertIfAbsent(
+                eq(UUID.fromString("11111111-1111-4111-8111-111111111101")),
+                eq("aggregate-1"), envelopeCaptor.capture(), any(String.class), any(Instant.class));
+        assertEquals(envelopeCaptor.getAllValues().get(0), envelopeCaptor.getAllValues().get(1));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void ignoresNonAnomalyEventTypesRegardlessOfPayloadText() throws Exception {
                 AnomalyAlertOutboxRepository repository = mock(AnomalyAlertOutboxRepository.class);
                 KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);

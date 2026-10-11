@@ -94,6 +94,28 @@ class AnomalyAlertOutboxRelayTest {
         verify(repository).markPublished(eq(EVENT_ID), any(Instant.class));
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void republishesSameEventWhenKafkaAcknowledgesButPublishedStateCannotBeSaved() {
+        AnomalyAlertOutboxEvent event = event();
+        when(repository.claimNext(any(Instant.class), any(Instant.class)))
+                .thenReturn(Mono.just(event), Mono.just(event));
+        when(kafkaTemplate.send(any(ProducerRecord.class)))
+                .thenReturn(CompletableFuture.completedFuture(null));
+        when(repository.markPublished(eq(EVENT_ID), any(Instant.class)))
+                .thenReturn(Mono.error(new IllegalStateException("database unavailable")), Mono.just(1));
+        when(repository.recordFailure(eq(EVENT_ID), any(), any(Instant.class))).thenReturn(Mono.just(1));
+
+        relay.publishNextAlert();
+        relay.publishNextAlert();
+
+        var recordCaptor = org.mockito.ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaTemplate, org.mockito.Mockito.times(2)).send(recordCaptor.capture());
+        assertEquals(recordCaptor.getAllValues().get(0).value(), recordCaptor.getAllValues().get(1).value());
+        verify(repository, org.mockito.Mockito.times(2)).markPublished(eq(EVENT_ID), any(Instant.class));
+        verify(repository).recordFailure(eq(EVENT_ID), eq("database unavailable"), any(Instant.class));
+    }
+
     private AnomalyAlertOutboxEvent event() {
         return new AnomalyAlertOutboxEvent(
                 EVENT_ID,

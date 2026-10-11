@@ -2,16 +2,20 @@ package com.eventdrivenmicroservices.platform;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyAlertOutboxRepository;
-import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyEventListener;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.EventEnvelope;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.LedgerEventRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.LoanApplicationRepository;
 import com.eventdrivenmicroservices.platform.model.LoanApplication;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -31,8 +35,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 import java.util.function.Supplier;
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers(disabledWithoutDocker = true)
@@ -86,10 +93,10 @@ public class E2EOutboxIntegrationTest {
     private LedgerEventRepository ledgerEventRepository;
 
     @Autowired
-    private AnomalyEventListener anomalyEventListener;
+    private AnomalyAlertOutboxRepository anomalyAlertOutboxRepository;
 
     @Autowired
-    private AnomalyAlertOutboxRepository anomalyAlertOutboxRepository;
+    private KafkaTemplate<String, String> kafkaTemplate;
 
     @Autowired
     private DatabaseClient databaseClient;
@@ -185,7 +192,7 @@ public class E2EOutboxIntegrationTest {
 
         awaitAlertIntent(anomalyEvent.getId());
         Assertions.assertEquals(1, countAlertIntents(anomalyEvent.getId()));
-        anomalyEventListener.consumeOutboxEvent(outboxRecord);
+        resendAndAwaitConsumerCommit(outboxRecord);
         Assertions.assertEquals(1, countAlertIntents(anomalyEvent.getId()));
 
         ConsumerRecord<String, String> alertRecord = consumeKafkaRecord(
@@ -224,6 +231,35 @@ public class E2EOutboxIntegrationTest {
         }
 
         throw new AssertionError("Event was not published to topic " + topic + " within 30 seconds: " + eventId);
+    }
+
+    private void resendAndAwaitConsumerCommit(ConsumerRecord<String, String> originalRecord) throws Exception {
+        ProducerRecord<String, String> duplicate = new ProducerRecord<>(
+                originalRecord.topic(), originalRecord.key(), originalRecord.value());
+        Header traceparent = originalRecord.headers().lastHeader("traceparent");
+        if (traceparent != null) {
+            duplicate.headers().add("traceparent", traceparent.value());
+        }
+        var metadata = kafkaTemplate.send(duplicate).get(30, TimeUnit.SECONDS).getRecordMetadata();
+        TopicPartition topicPartition = new TopicPartition(metadata.topic(), metadata.partition());
+
+        Properties properties = new Properties();
+        properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
+        try (AdminClient adminClient = AdminClient.create(properties)) {
+            StepVerifier.create(Mono.fromCallable(() -> {
+                        var offsets = adminClient.listConsumerGroupOffsets(
+                                        "eventdrivenmicroservices-anomaly-cep-group")
+                                .partitionsToOffsetAndMetadata()
+                                .get(5, TimeUnit.SECONDS);
+                        var committed = offsets.get(topicPartition);
+                        return committed != null && committed.offset() > metadata.offset();
+                    })
+                    .filter(Boolean::booleanValue)
+                    .repeatWhenEmpty(retries -> retries.delayElements(Duration.ofMillis(100)).take(50)))
+                    .expectNext(true)
+                    .expectComplete()
+                    .verify(Duration.ofSeconds(8));
+        }
     }
 
     private String traceparent(ConsumerRecord<String, String> record) {

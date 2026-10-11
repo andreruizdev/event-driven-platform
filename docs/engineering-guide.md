@@ -4,16 +4,17 @@ This is the single source for developer setup, verification evidence, current ga
 
 ## Current Status
 
-Last checked: 2026-10-09.
+Last checked: 2026-10-11.
 
 | Area | Current evidence |
 |---|---|
 | Java build and tests | Latest recorded CI run `195c0fe` passed all 37 tests; later commits have no recorded CI result. Local full suite on 2026-10-10 passed 43 of 46 tests; 3 Docker-backed integration tests were skipped (Testcontainers 1.19.7 negotiates Docker API 1.32, below the local daemon minimum of 1.40), with 0 failures/errors. The anomaly-alert replay E2E has therefore not run locally. |
+| Recovery fault tests | On 2026-10-11, focused CDC bridge, anomaly listener, and alert relay tests passed with injected Kafka-send and database-update failures. These are mocked component tests, not proof of Debezium restart or live broker outage recovery. |
 | Debezium CDC | Optional CDC mode is live-verified in isolated Kind namespace `cdc-validation`: connector/task reached `RUNNING`; a committed outbox row reached the shadow topic and the bridge emitted the canonical `EventEnvelope`, after which the row was marked processed. Poller remains the default mode. Connector restart/replay and CDC consumer crash recovery remain unverified. |
 | Fast behavior tests | Controller, service, anomaly, outbox, JWT signature/configuration, and architecture tests pass. |
 | Outbox observability | Pending count/age gauges, publish/failure/retry counters, latency histogram, and payload-free recent-event summaries are implemented and covered by unit/controller tests. |
 | Control room | Updated HTML, CSS, and JavaScript were served from the current local Spring process; `/api/v1/outbox/recent` returned HTTP 200 with Basic authentication. No browser automation or JavaScript runtime is installed in this container. |
-| PostgreSQL/Kafka/Redis integration | Latest CI run for `195c0fe` passed the health-checked service-backed tests and no-skip report gate. Local Testcontainers tests still skip without Docker. |
+| PostgreSQL/Kafka/Redis integration | Latest CI run for `195c0fe` passed the health-checked service-backed tests and no-skip report gate. A local rerun on 2026-10-11 reported both `E2EOutboxIntegrationTest` cases skipped despite the Docker CLI being reachable; duplicate-consumer E2E remains unverified locally. |
 | Helm and Grafana | `helm lint` and `helm template` pass for `deploy/helm/event-driven-lab`, including the new outbox panels. Live dashboard queries have not been verified against a deployed current checkout. |
 | Kind | Latest CI run for `195c0fe` built/loaded `platform-engine:local`, installed the chart in `event-driven-lab`, and passed the readiness job. PostgreSQL persistence across pod restart remains unverified. |
 | E2E business slices | CI verifies loan -> PostgreSQL/outbox -> Kafka -> ledger and Redis-backed anomaly -> alert topic with `traceparent`. Browser-driven UI behavior, full Tempo trace visualization, and the telemetry UI workflow remain unverified. |
@@ -92,7 +93,7 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 - [x] Add an idempotent Helm hook to create the dedicated replication role and insert-only outbox publication from externally managed secrets.
 - [x] ~~Add a default-on `OUTBOX_POLLER_ENABLED` switch~~ — superseded by `OUTBOX_PUBLISHER_MODE` below; `OUTBOX_POLLER_ENABLED` no longer exists in code or the chart.
 - [x] Configure Connect's environment-backed secret provider and Secret reference, REST service, and health probes; keep the connector version tagged.
-- [x] Add a Helm-managed idempotent connector registration Job; it waits for connector and task state to become `RUNNING`. Live execution remains unverified.
+- [x] Add a Helm-managed idempotent connector registration Job; it waits for connector and task state to become `RUNNING`. Isolated Kind registration and basic delivery were live-verified on 2026-10-09; restart/replay remains open.
 - [x] Map committed outbox inserts from the raw Debezium shadow topic to the established Kafka topic, key, `EventEnvelope`, event ID, and trace metadata. The publication emits inserts only, excluding `processed`, lock, and retry updates.
 - [x] Add a single `OUTBOX_PUBLISHER_MODE` (`poller` by default, `cdc` opt-in) so the scheduled relay and CDC bridge are mutually exclusive.
 - [x] Define `processed` in CDC mode as successfully published to the canonical Kafka topic, not consumer completion. A bridge crash after Kafka acknowledgement but before the database update can republish on replay; consumer idempotency is still required.
@@ -106,8 +107,10 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 - [x] Verify duplicate input replay creates one alert intent in isolated Kind.
 - [x] Route malformed/unsupported envelopes to an explicitly provisioned seven-day DLT with original Kafka coordinates; parser diagnostics do not copy rejected payload data into headers.
 - [x] Configure indefinite one-second retries for transient listener failures; live outage recovery remains unverified.
-- [x] Add a focused unit test for the alert relay's Kafka-send failure followed by successful retry; all 3 tests passed locally on 2026-10-09. Mock-only, not a live broker outage drill.
-- [ ] Run the PostgreSQL-backed duplicate-delivery E2E assertion (local run skipped because the Testcontainers Docker API client is older than the local daemon's minimum supported API).
+- [x] Add focused fault-injection tests for CDC Kafka outage recovery and publish-acknowledged/database-mark failure; replay uses the same event ID and envelope. Mocked Kafka/repository only; passed locally on 2026-10-11.
+- [x] Add listener redelivery-after-intent and alert-relay publish-acknowledged/database-mark failure tests. Unit tests passed locally on 2026-10-11; they do not prove actual process restart or downstream alert deduplication.
+- [x] Extend the PostgreSQL/Kafka E2E to send a duplicate anomaly event through the real listener topic and wait for the consumer-group offset to advance before asserting one alert intent. A local 2026-10-11 run skipped both E2E cases; CI execution is still required.
+- [ ] Run the PostgreSQL/Kafka duplicate-delivery E2E without skips and verify the new group-offset assertion.
 - [ ] Exercise connector restart, consumer crash between intent commit and offset commit, Kafka outage, and recovery. The relay may duplicate the alert if it crashes after Kafka acknowledgement but before marking the intent published; downstream alert consumers must deduplicate by `eventId`.
 - [ ] Measure bounded backlog/lag/recovery targets and define DLT inspection/replay operations.
 - [ ] Measure high-volume bursts and sustained throughput; specify bounded backlog, consumer lag, and recovery-time targets before claiming surge tolerance.
