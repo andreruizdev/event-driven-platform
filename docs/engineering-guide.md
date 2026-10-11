@@ -8,7 +8,7 @@ Last checked: 2026-10-09.
 
 | Area | Current evidence |
 |---|---|
-| Java build and tests | Latest CI run for `195c0fe` passed all 37 tests. Local full suite on 2026-10-09 passed 42 of 45 tests; 3 Docker-backed integration tests were skipped, with 0 failures/errors. |
+| Java build and tests | Latest recorded CI run `195c0fe` passed all 37 tests; later commits have no recorded CI result. Local full suite on 2026-10-10 passed 43 of 46 tests; 3 Docker-backed integration tests were skipped (Testcontainers 1.19.7 negotiates Docker API 1.32, below the local daemon minimum of 1.40), with 0 failures/errors. The anomaly-alert replay E2E has therefore not run locally. |
 | Debezium CDC | Optional CDC mode is live-verified in isolated Kind namespace `cdc-validation`: connector/task reached `RUNNING`; a committed outbox row reached the shadow topic and the bridge emitted the canonical `EventEnvelope`, after which the row was marked processed. Poller remains the default mode. Connector restart/replay and CDC consumer crash recovery remain unverified. |
 | Fast behavior tests | Controller, service, anomaly, outbox, JWT signature/configuration, and architecture tests pass. |
 | Outbox observability | Pending count/age gauges, publish/failure/retry counters, latency histogram, and payload-free recent-event summaries are implemented and covered by unit/controller tests. |
@@ -90,7 +90,7 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 
 - [x] Configure the Helm PostgreSQL workload for logical replication (`wal_level=logical`).
 - [x] Add an idempotent Helm hook to create the dedicated replication role and insert-only outbox publication from externally managed secrets.
-- [x] Add a default-on `OUTBOX_POLLER_ENABLED` switch so the scheduled relay can be disabled once CDC contract compatibility is proven.
+- [x] ~~Add a default-on `OUTBOX_POLLER_ENABLED` switch~~ — superseded by `OUTBOX_PUBLISHER_MODE` below; `OUTBOX_POLLER_ENABLED` no longer exists in code or the chart.
 - [x] Configure Connect's environment-backed secret provider and Secret reference, REST service, and health probes; keep the connector version tagged.
 - [x] Add a Helm-managed idempotent connector registration Job; it waits for connector and task state to become `RUNNING`. Live execution remains unverified.
 - [x] Map committed outbox inserts from the raw Debezium shadow topic to the established Kafka topic, key, `EventEnvelope`, event ID, and trace metadata. The publication emits inserts only, excluding `processed`, lock, and retry updates.
@@ -119,8 +119,9 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 - [ ] Add persistent PostgreSQL storage to the chart and test data survival across pod replacement.
 - [ ] Monitor Debezium connector/task state, replication-slot WAL retention, Kafka consumer lag, outbox age/depth, retry rate, and end-to-end event latency; alert on stalled progress and WAL growth.
 - [ ] Define WAL, Kafka, outbox, and telemetry retention together. Never purge unconsumed/unconfirmed events; prove expired-data boundaries while preserving recoverability.
-- [ ] Add ledger verification, database append-only enforcement, and serialized/concurrent append tests.
-- [ ] Complete JWT algorithm/claims/expiry validation, startup secret checks, and authorization tests.
+- [ ] Add ledger verification, database append-only enforcement, and serialized/concurrent append tests. Audit: `LedgerService` reads the head via `ORDER BY created_at DESC LIMIT 1` without a lock or conflict retry, so concurrent appends can collide on the unique `previous_hash` index and timestamp ties make the head ambiguous; only `GET /api/v1/ledger` and `/latest-hash` exist.
+- [ ] Harden `DataComplianceService`: the purge runs fire-and-forget (`.subscribe()`), drops only one monthly partition computed from the cutoff, and partitions exist only through 2027-06 with no creation job. Make it a chained reactive job, add partition pre-creation, and reconcile the 7-day retention default with monthly partitions.
+- [ ] Complete JWT algorithm/claims/expiry validation, role-to-authority mapping, and authorization tests. Audit: the filter checks only the HMAC signature and always grants the same principal with no authorities.
 - [ ] Test Redis outage and fallback explicitly. Redis-backed anomaly decisions are shared state; the in-memory fallback is per process and can diverge across replicas.
 
 **Exit gate:** Failure drills demonstrate bounded backlog, observable recovery, durable source data, deterministic ledger verification, and no retention of expired data beyond policy.

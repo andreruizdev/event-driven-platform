@@ -30,7 +30,7 @@ flowchart TD
         RELAY -->|Versioned EventEnvelope| KAFKA[Apache Kafka]
         KAFKA -->|Kafka Consumer Group| LISTENER[Anomaly Event Listener]
         LISTENER -->|Matching event payload| ALERT[eventdrivenmicroservices-anomaly-alerts]
-        API <-->|Sliding Window State| REDIS[(Redis 7 Cluster)]
+        API <-->|Sliding Window State| REDIS[(Redis 7, single node)]
     end
 
     subgraph Unified Observability
@@ -48,7 +48,7 @@ flowchart TD
 
 ## 2. Ingestion & API Layer
 
-The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom HMAC Bearer-token check. The token check verifies the signature but does not currently validate standard JWT claims or expiry.
+The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom HMAC Bearer-token check. The token check verifies the signature but does not currently validate standard JWT claims, algorithm, or expiry, and grants no authorities (only the fixed `eventdrivenmicroservices-edge-node` principal).
 
 * `POST /api/v1/loans`: Ingests loan origination applications, validates applicant UUIDs and dynamic loan tier properties, persists the loan, creates an outbox event, and appends an `ApplicationSubmitted` record to the SHA-256 ledger.
 * `POST /api/v1/transactions`: Ingests financial transactions, evaluates real-time sliding-window velocity thresholds, and dual-writes transaction state with outbox events.

@@ -20,14 +20,16 @@ flowchart TD
 
     subgraph Atomic R2DBC Persistence & Ledger
         OutboxSave -->|Single Tx| DB[(PostgreSQL)]
-      DB -->|outbox_events| Poller[Scheduled Outbox Processor]
+      DB -->|outbox_events| Poller[Outbox Publisher<br/>poller default, Debezium CDC opt-in]
         DB -->|ledger_events| Ledger[(SHA-256 Ledger<br/>Type: ANOMALY_FLAGGED)]
     end
 
     subgraph Messaging & Observability
         Poller -->|Kafka Producer| Kafka[Apache Kafka]
-        Kafka -->|Kafka Listener| CEP[Anomaly Event Listener CEP]
-        CEP -->|Alerts| AlertTopic[eventdrivenmicroservices-anomaly-alerts]
+        Kafka -->|Kafka Listener| CEP[Anomaly Event Listener<br/>routes by eventType]
+        Kafka -.->|malformed| DLT[outbox-events.DLT]
+        CEP -->|insert if absent| AlertOutbox[(anomaly_alert_outbox)]
+        AlertOutbox -->|Alert Relay| AlertTopic[eventdrivenmicroservices-anomaly-alerts]
 
         Engine -.->|OTLP Metrics & Traces| OTel[OTel Collector]
         OTel --> Prometheus[Prometheus Metrics]
@@ -41,7 +43,8 @@ flowchart TD
    - Non-blocking reactive HTTP ingestion API.
    - **Streaming Anomaly Detection Engine**: In-memory sliding window calculating transaction velocity bursts and telemetry Z-Score metric outliers.
    - **Transactional Outbox Pattern**: Persists domain entities (`loan_applications`, `telemetry_events`, `financial_transactions`) alongside `outbox_events` and append-only cryptographic `ledger_events` using PostgreSQL R2DBC.
-   - **Kafka Listener**: Consumes outbox topic records and forwards records whose payload text matches the current anomaly markers to `eventdrivenmicroservices-anomaly-alerts`.
+   - **Outbox Publisher**: `OUTBOX_PUBLISHER_MODE=poller` (default) runs a leased, retrying scheduled relay; `cdc` runs the Debezium bridge instead. The two are mutually exclusive.
+   - **Kafka Listener**: Validates the version-1 envelope, routes anomaly event types, durably records an alert intent in `anomaly_alert_outbox` (idempotent on redelivery), and sends malformed records to the `.DLT` topic. A relay publishes intents to `eventdrivenmicroservices-anomaly-alerts` with backoff.
 
 2. **`deploy/helm`**:
    - Helm chart packaging the platform-engine alongside infrastructure services (Kafka, Zookeeper, PostgreSQL, Redis, OpenTelemetry Collector, Prometheus, Grafana, Tempo, Loki).
@@ -57,7 +60,7 @@ flowchart TD
 - **Transactional Outbox Pattern**: Enforces dual-write consistency by persisting business state and event records in a single database transaction prior to asynchronous Kafka publishing.
 - **Reactive Non-Blocking Core**: Built on Spring WebFlux, Project Reactor, and R2DBC to maximize vertical I/O throughput without thread-per-request bottlenecks.
 - **Cryptographic Ledger**: SHA-256 hash-chained append-only `ledger_events` table for tamper-evident transaction history.
-- **Debezium**: A Connect deployment and connector ConfigMap exist in Helm, but the connector is not registered by the current scripts. The active publisher is the scheduled application relay; CDC delivery is not verified.
+- **Debezium (opt-in)**: Helm deploys Connect and a registration Job. CDC-to-envelope delivery was verified in an isolated Kind namespace; the default publisher remains the scheduled relay until restart/replay recovery is proven (see the engineering guide).
 - **Distributed Tracing & Monitoring**: OpenTelemetry (OTLP) metrics and trace exemplars routed to Prometheus and Grafana Tempo via the OTel Collector.
 - **Kubernetes Deployment Hardening**: Security contexts (non-root, read-only filesystem), init containers for dependency readiness, and HPA autoscaling.
 
@@ -113,7 +116,10 @@ Run the single entry-point script to validate the toolchain, run Gradle tests, p
 
 ## Current Limitations
 
-- The project is a modular monolith. The scheduled outbox relay is active; the packaged Debezium connector configuration is not registered as part of the documented workflow.
+- The project is a modular monolith. The scheduled outbox relay is the default publisher; Debezium CDC is opt-in and its crash/replay recovery is not yet proven.
+- Delivery is at-least-once with idempotent consumer effects, not exactly-once.
+- The bearer-token check validates only the HMAC signature (no expiry/claims yet).
+- Duplicate-delivery E2E tests need a Docker daemon compatible with the pinned Testcontainers; they are skipped locally when it is not.
 - Trace headers are handled in some paths, but a complete live HTTP-to-Kafka-to-ledger trace has not been verified.
 - The ledger is hash-chained, but database-level append-only enforcement and a full integrity verification operation are not implemented.
 - The Helm PostgreSQL workload has no persistent volume. The chart is a local lab deployment, not a production-ready data platform.
