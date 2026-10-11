@@ -29,7 +29,9 @@ flowchart TD
     subgraph Streaming & Analytics
         RELAY -->|Versioned EventEnvelope| KAFKA[Apache Kafka]
         KAFKA -->|Kafka Consumer Group| LISTENER[Anomaly Event Listener]
-        LISTENER -->|Matching event payload| ALERT[eventdrivenmicroservices-anomaly-alerts]
+        LISTENER -->|insertIfAbsent by eventId| ALERTBOX[(anomaly_alert_outbox)]
+        ALERTBOX --> ALERTRELAY[Alert Outbox Relay]
+        ALERTRELAY -->|publish, then mark published| ALERT[eventdrivenmicroservices-anomaly-alerts]
         API <-->|Sliding Window State| REDIS[(Redis 7, single node)]
     end
 

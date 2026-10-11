@@ -110,7 +110,8 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 - [x] Add focused fault-injection tests for CDC Kafka outage recovery and publish-acknowledged/database-mark failure; replay uses the same event ID and envelope. Mocked Kafka/repository only; passed locally on 2026-10-11.
 - [x] Add listener redelivery-after-intent and alert-relay publish-acknowledged/database-mark failure tests. Unit tests passed locally on 2026-10-11; they do not prove actual process restart or downstream alert deduplication.
 - [x] Extend the PostgreSQL/Kafka E2E to send a duplicate anomaly event through the real listener topic and wait for the consumer-group offset to advance before asserting one alert intent. A local 2026-10-11 run skipped both E2E cases; CI execution is still required.
-- [ ] Run the PostgreSQL/Kafka duplicate-delivery E2E without skips and verify the new group-offset assertion.
+- [x] Run the PostgreSQL/Kafka duplicate-delivery E2E without skips and verify the new group-offset assertion. Verified 2026-10-11 by CI run 38181492686 (commit cbcb72b), whose no-skip report gate passed.
+- [ ] Run the live Debezium connector restart/replay drill in an ephemeral Kind CI job.
 - [ ] Exercise connector restart, consumer crash between intent commit and offset commit, Kafka outage, and recovery. The relay may duplicate the alert if it crashes after Kafka acknowledgement but before marking the intent published; downstream alert consumers must deduplicate by `eventId`.
 - [ ] Measure bounded backlog/lag/recovery targets and define DLT inspection/replay operations.
 - [ ] Measure high-volume bursts and sustained throughput; specify bounded backlog, consumer lag, and recovery-time targets before claiming surge tolerance.
