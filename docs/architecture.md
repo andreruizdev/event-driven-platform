@@ -57,6 +57,7 @@ The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom H
 * `POST /api/v1/telemetry`: High-throughput telemetry ingestion evaluating rolling Z-score outliers ($Z > 3.0$).
 * `GET /api/v1/ledger`: Retrieves chronological ledger event history with hash proofs.
 * `GET /api/v1/ledger/latest-hash`: Exposes the latest cryptographic head of the SHA-256 chain.
+* `GET /api/v1/ledger/verify`: Recomputes the full chain in append order and returns `valid`, `eventsChecked`, and the first invalid event ID and reason, if any.
 * `GET /api/v1/outbox/status`: Returns current outbox backlog depth, oldest unprocessed record timestamp, and queue age.
 * `GET /`: Interactive web control room serving static WebFlux resources for operators and live demos.
 

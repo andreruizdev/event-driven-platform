@@ -14,6 +14,9 @@ public interface LedgerEventRepository extends ReactiveCrudRepository<LedgerEven
 
     Flux<LedgerEvent> findAllByOrderByCreatedAtDesc();
     
-    @Query("SELECT current_hash FROM ledger_events ORDER BY created_at DESC LIMIT 1")
+    @Query("SELECT current_hash FROM ledger_events ORDER BY seq DESC LIMIT 1")
     Mono<String> findLatestHash();
+
+    @Query("SELECT * FROM ledger_events ORDER BY seq ASC")
+    Flux<LedgerEvent> findAllInChainOrder();
 }

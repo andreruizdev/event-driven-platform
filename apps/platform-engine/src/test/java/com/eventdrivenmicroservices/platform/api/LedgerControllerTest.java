@@ -29,6 +29,24 @@ class LedgerControllerTest {
     @MockBean
     private LedgerEventRepository ledgerEventRepository;
 
+    @MockBean
+    private com.eventdrivenmicroservices.platform.application.LedgerService ledgerService;
+
+    @Test
+    void returnsChainVerification() {
+        when(ledgerService.verifyChain()).thenReturn(Mono.just(
+                new com.eventdrivenmicroservices.platform.application.LedgerVerification(true, 3, null, null)));
+
+        webTestClient.get()
+            .uri("/api/v1/ledger/verify")
+            .headers(headers -> headers.setBasicAuth("admin", "test"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.valid").isEqualTo(true)
+                .jsonPath("$.eventsChecked").isEqualTo(3);
+    }
+
     @Test
     void listsLedgerEvents() {
         LedgerEvent event = LedgerEvent.builder()

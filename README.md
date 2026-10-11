@@ -60,7 +60,7 @@ flowchart TD
 - **Transactional Outbox Pattern**: Enforces dual-write consistency by persisting business state and event records in a single database transaction prior to asynchronous Kafka publishing.
 - **Reactive Non-Blocking Core**: Built on Spring WebFlux, Project Reactor, and R2DBC to maximize vertical I/O throughput without thread-per-request bottlenecks.
 - **Cryptographic Ledger**: SHA-256 hash-chained append-only `ledger_events` table for tamper-evident transaction history.
-- **Debezium (opt-in)**: Helm deploys Connect and a registration Job. CDC-to-envelope delivery was verified in an isolated Kind namespace; the default publisher remains the scheduled relay until restart/replay recovery is proven (see the engineering guide).
+- **Debezium (opt-in)**: Helm deploys Connect and a registration Job. CDC-to-envelope delivery and a connector restart were verified in Kind (CI `cdc-drill`); the default publisher remains the scheduled relay until Connect pod loss and bridge-crash replay are also proven (see the engineering guide).
 - **Distributed Tracing & Monitoring**: OpenTelemetry (OTLP) metrics and trace exemplars routed to Prometheus and Grafana Tempo via the OTel Collector.
 - **Kubernetes Deployment Hardening**: Security contexts (non-root, read-only filesystem), init containers for dependency readiness, and HPA autoscaling.
 
@@ -116,7 +116,7 @@ Run the single entry-point script to validate the toolchain, run Gradle tests, p
 
 ## Current Limitations
 
-- The project is a modular monolith. The scheduled outbox relay is the default publisher; Debezium CDC is opt-in and its crash/replay recovery is not yet proven.
+- The project is a modular monolith. The scheduled outbox relay is the default publisher; Debezium CDC is opt-in; connector restart is CI-verified, while Connect pod loss and bridge-crash replay are not yet proven.
 - Delivery is at-least-once with idempotent consumer effects, not exactly-once.
 - The bearer-token check validates only the HMAC signature (no expiry/claims yet).
 - Duplicate-delivery E2E tests need a Docker daemon compatible with the pinned Testcontainers; they are skipped locally when it is not.

@@ -4,7 +4,9 @@ import com.eventdrivenmicroservices.platform.domain.LedgerEvent;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.LedgerEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
@@ -19,10 +21,14 @@ import java.util.UUID;
 public class LedgerService {
 
     private final LedgerEventRepository ledgerEventRepository;
+    private final DatabaseClient databaseClient;
+    private final TransactionalOperator transactionalOperator;
     private static final String GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
+    // Held until the surrounding transaction commits, serializing head-read and insert across replicas.
+    private static final String APPEND_LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('ledger_events'))";
 
     public Mono<LedgerEvent> appendToLedger(String transactionType, String payload) {
-        return ledgerEventRepository.findLatestHash()
+        return databaseClient.sql(APPEND_LOCK_SQL).fetch().all().then(ledgerEventRepository.findLatestHash())
                 .defaultIfEmpty(GENESIS_HASH)
                 .flatMap(previousHash -> {
                     String dataToHash = previousHash + transactionType + payload;
@@ -37,8 +43,34 @@ public class LedgerService {
                             
                     return ledgerEventRepository.save(event);
                 })
+                .as(transactionalOperator::transactional)
                 .doOnSuccess(event -> log.info("Appended to ledger. Hash: {}", event.getCurrentHash()))
                 .doOnError(e -> log.error("Failed to append to ledger", e));
+    }
+
+    public Mono<LedgerVerification> verifyChain() {
+        return ledgerEventRepository.findAllInChainOrder()
+                .reduce(new ChainState(GENESIS_HASH, 0, null, null), this::advance)
+                .map(state -> new LedgerVerification(
+                        state.invalidEventId() == null, state.checked(), state.invalidEventId(), state.reason()));
+    }
+
+    private ChainState advance(ChainState state, LedgerEvent event) {
+        long checked = state.checked() + 1;
+        if (state.invalidEventId() != null) {
+            return new ChainState(state.expectedPreviousHash(), checked, state.invalidEventId(), state.reason());
+        }
+        if (!state.expectedPreviousHash().equals(event.getPreviousHash())) {
+            return new ChainState(state.expectedPreviousHash(), checked, event.getId(), "previous hash does not link to prior event");
+        }
+        String recomputed = calculateSHA256(event.getPreviousHash() + event.getTransactionType() + event.getPayload());
+        if (!recomputed.equals(event.getCurrentHash())) {
+            return new ChainState(state.expectedPreviousHash(), checked, event.getId(), "current hash does not match event content");
+        }
+        return new ChainState(event.getCurrentHash(), checked, null, null);
+    }
+
+    private record ChainState(String expectedPreviousHash, long checked, UUID invalidEventId, String reason) {
     }
 
     public Mono<LedgerEvent> appendEvent(String transactionType, String payload) {

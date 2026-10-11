@@ -233,6 +233,34 @@ public class E2EOutboxIntegrationTest {
         throw new AssertionError("Event was not published to topic " + topic + " within 30 seconds: " + eventId);
     }
 
+    @Autowired
+    private com.eventdrivenmicroservices.platform.application.LedgerService ledgerService;
+
+    @Test
+    void concurrentLedgerAppendsKeepAVerifiableChainAndRejectMutation() {
+        long before = ledgerEventRepository.count().block(Duration.ofSeconds(5));
+
+        var appended = reactor.core.publisher.Flux.range(0, 20)
+                .flatMap(i -> ledgerService.appendToLedger("ConcurrentAppend", "{\"i\":" + i + "}"), 20)
+                .collectList()
+                .block(Duration.ofSeconds(30));
+
+        Assertions.assertEquals(20, appended.size());
+        Assertions.assertEquals(before + 20, ledgerEventRepository.count().block(Duration.ofSeconds(5)));
+        Assertions.assertEquals(20, appended.stream().map(e -> e.getPreviousHash()).distinct().count());
+
+        var verification = ledgerService.verifyChain().block(Duration.ofSeconds(10));
+        Assertions.assertTrue(verification.valid(), () -> "Ledger chain invalid: " + verification);
+        Assertions.assertEquals(before + 20, verification.eventsChecked());
+
+        StepVerifier.create(databaseClient.sql("UPDATE ledger_events SET payload = 'tampered'").fetch().rowsUpdated())
+                .expectErrorMatches(e -> e.getMessage().contains("append-only"))
+                .verify(Duration.ofSeconds(5));
+        StepVerifier.create(databaseClient.sql("DELETE FROM ledger_events").fetch().rowsUpdated())
+                .expectErrorMatches(e -> e.getMessage().contains("append-only"))
+                .verify(Duration.ofSeconds(5));
+    }
+
     private void resendAndAwaitConsumerCommit(ConsumerRecord<String, String> originalRecord) throws Exception {
         ProducerRecord<String, String> duplicate = new ProducerRecord<>(
                 originalRecord.topic(), originalRecord.key(), originalRecord.value());

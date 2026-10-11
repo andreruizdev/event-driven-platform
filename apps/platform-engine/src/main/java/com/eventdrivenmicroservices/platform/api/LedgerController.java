@@ -1,5 +1,7 @@
 package com.eventdrivenmicroservices.platform.api;
 
+import com.eventdrivenmicroservices.platform.application.LedgerService;
+import com.eventdrivenmicroservices.platform.application.LedgerVerification;
 import com.eventdrivenmicroservices.platform.domain.LedgerEvent;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.LedgerEventRepository;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +19,12 @@ import java.util.Map;
 public class LedgerController {
 
     private final LedgerEventRepository ledgerEventRepository;
+    private final LedgerService ledgerService;
+
+    @GetMapping("/verify")
+    public Mono<LedgerVerification> verify() {
+        return ledgerService.verifyChain();
+    }
 
     @GetMapping
     public Flux<LedgerEvent> list() {
