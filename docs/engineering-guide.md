@@ -8,18 +8,18 @@ Last checked: 2026-10-12.
 
 | Area | Current evidence |
 |---|---|
-| Java build and tests | CI run 38204706720 (commit `3220b65`, 2026-10-12) passed the full suite with the no-skip report gate for the Docker-backed integration tests. Testcontainers is now 1.21.4; on a daemon whose minimum API is 1.40+, set `api.version=1.44` in `~/.docker-java.properties` (docker-java still defaults to 1.32). The full local `./gradlew test` suite also passed on 2026-10-12 with Docker-backed tests and the Chromium UI workflow test, 0 skipped. |
+| Java build and tests | CI run 38206550351 (commit `5383987`, 2026-10-12) passed the full suite with the no-skip report gate, including the Playwright browser workflow and PostgreSQL migration/retention tests. Testcontainers is 1.21.4; on a daemon whose minimum API is 1.40+, set `api.version=1.44` in `~/.docker-java.properties` (docker-java still defaults to 1.32). The full local `./gradlew test` suite also passed on 2026-10-12 with Docker-backed tests, 0 skipped. |
 | Recovery fault tests | On 2026-10-11, focused CDC bridge, anomaly listener, and alert relay tests passed with injected Kafka-send and database-update failures. These are mocked component tests, not proof of Debezium restart or live broker outage recovery. |
-| Debezium CDC | Optional CDC mode is live-verified in isolated Kind namespace `cdc-validation`: connector/task reached `RUNNING`; a committed outbox row reached the shadow topic and the bridge emitted the canonical `EventEnvelope`, after which the row was marked processed. CDC is the default mode (since 2026-10-12); the poller is an opt-in fallback. On 2026-10-11, the `Debezium CDC Drill (Kind)` CI job (run 38182187800, commit `d61fd1e`, `scripts/cdc-drill.sh`) passed on a clean Kind cluster in `cdc` mode: connector/task `RUNNING`, a row processed, a connector restart with tasks, `RUNNING` again, a second row processed, and exactly one canonical Kafka message per row. Kafka Connect pod loss, bridge crash between publish and `processed`, and a live Kafka outage under CDC remain unverified. | Update 2026-10-12 (CI run 38189122766, commit `08a74e1`): with the default chart (`cdc`), the drill also passed Connect pod deletion and platform-pod deletion, and measured 20 sequential samples at p50 69 ms, p95 105 ms, max 170 ms (`poll.interval.ms=50`; the default 500 ms gave p50 481 ms, p95 771 ms). The drill gates p95 at 500 ms.
+| Debezium CDC | CDC has been the Helm default since 2026-10-12; the poller is opt-in. CI runs 38182187800 and 38186479608 exercised connector restart, Connect pod loss with an outbox row written during the outage, and platform-pod loss; the row was processed after recovery. The connector-state alert was separately exercised firing and clearing in CI run 38201832047. Run 38189122766 measured 20 sequential samples at p50 69 ms, p95 105 ms, max 170 ms with `poll.interval.ms=50`; the drill's p95 budget is 500 ms. This verifies recovery and delivery, not deterministic injection into the narrow publish-acknowledged/processed-update window; that remains a Gate 2 gap. |
 | Fast behavior tests | Controller, service, anomaly, outbox, ledger verification, retention planning, JWT signature/claims/configuration, and architecture tests pass locally. |
 | Outbox observability | Pending count/age gauges, publish/failure/retry counters, latency histogram, and payload-free recent-event summaries are implemented and covered by unit/controller tests. |
 | Control room | Playwright/Chromium E2E test drives authenticated loan submission and a six-transaction anomaly burst, then asserts both event types appear in the UI evidence table. Passed locally and in CI run 38204706720. The test requires the `installPlaywrightChromium` Gradle task. |
-| PostgreSQL/Kafka/Redis integration | CI run 38206550351 (commit `5383987`, 2026-10-12) passed the full build/test and no-skip gate, including duplicate-delivery and concurrent ledger cases. It runs the V5-to-V6 PostgreSQL migration test, which preserves recent and overflow rows, and the retention test, which drops a fully expired hour while preserving a current row and cleaning expired overflow. The full local `./gradlew test` suite also passed on 2026-10-12 with 0 skipped. |
-| Helm and Grafana | `helm lint` and `helm template` pass for `deploy/helm/event-driven-lab`, including the new outbox panels. Live dashboard queries have not been verified against a deployed current checkout. |
+| PostgreSQL/Kafka/Redis integration | CI run 38206550351 (commit `5383987`, 2026-10-12) passed the full build/test and no-skip gate, including duplicate-delivery and concurrent ledger cases. It runs the V5-to-V6 PostgreSQL migration test, which preserves recent and overflow rows, and the retention test, which drops a fully expired hour while preserving a current row and cleaning expired overflow. |
+| Helm and Grafana | `helm lint` and `helm template` pass for `deploy/helm/event-driven-lab`; emitted-metric panels and alert rules are present. The CDC drill scrapes expected application, replication-slot, consumer-lag, and connector-state metrics, and verifies one connector alert firing/clearing. Grafana panel queries and the remaining alert rules have not been validated through a live dashboard/fault drill. |
 | Kind | CI run 38184674490 built/loaded `platform-engine:local`, installed the chart in `event-driven-lab`, passed readiness, and passed `scripts/postgres-durability-drill.sh`: a marker row survived deletion and replacement of the PVC-backed PostgreSQL pod. Run 38204706720 passed `scripts/postgres-backup-verify.sh`: it exported a custom-format archive, restored it into a temporary database, and matched representative table counts. Run 38206550351 also passed the durability and backup/restore drills after V6. The archive is saved to an operator-selected path; this is not scheduled or off-site backup. Node loss, volume expansion, and independent-storage restore remain untested. |
-| E2E business slices | CI verifies loan -> PostgreSQL/outbox -> Kafka -> ledger and Redis-backed anomaly -> alert topic with `traceparent`. Browser-driven loan/anomaly UI behavior is verified by Playwright; full Tempo trace visualization and the telemetry UI workflow remain unverified. |
-| CDC runtime check | On 2026-10-09, an isolated chart release registered the Debezium connector and verified a synthetic PostgreSQL insert in `eventdrivenmicroservices-outbox-events` as version-1 envelope with key/event ID/traceparent; database `processed=true` followed successful publication. This does not verify restart/replay or production cutover. |
-| Anomaly consumer durability | On 2026-10-09, isolated Kind verified anomaly envelope -> event-ID-keyed PostgreSQL alert intent -> alert topic; the row was marked published after Kafka acknowledgement. Replaying the same canonical event ID left one published intent. Broker crash-window duplicates and poison-event policy remain open. |
+| E2E business slices | CI verifies loan -> PostgreSQL/outbox -> Kafka -> ledger and Redis-backed anomaly -> alert topic with `traceparent`. Playwright verifies authenticated loan submission and an anomaly burst appear in the control-room evidence table. The CDC drill finds HTTP, ledger, CDC publish, and consumer spans in one Tempo trace. Full Tempo UI navigation, a UI trace link, and the telemetry browser workflow remain unverified. |
+| CDC runtime check | The dated Kind drills above verify connector restart and recovery after Connect pod loss, including processing an outbox row written while Connect is unavailable. They do not prove production cutover or deterministic recovery from the exact publish/processed crash window. |
+| Anomaly consumer durability | CI's PostgreSQL/Kafka E2E redelivers an anomaly event and waits for consumer offset progress before asserting one alert intent for its event ID. Alert intent persistence is idempotent; downstream alert consumers must still deduplicate because alert publication is at-least-once. Consumer process restart between intent commit and input offset commit, live Kafka outage recovery, and deterministic alert publish/mark crash remain open. |
 | Poison event handling | On 2026-10-09, isolated Kind verified malformed canonical input reaches the seven-day DLT with source topic/partition/offset metadata. Parser headers use a fixed payload-free message. Transient listener errors use an indefinite one-second retry policy; live outage recovery is not yet verified. |
 
 Do not promote skipped, mocked, or stale-cluster checks to “verified” status. Update this table only from a dated executable result.
@@ -28,7 +28,7 @@ Do not promote skipped, mocked, or stale-cluster checks to “verified” status
 
 Use Java 21 with the checked-in Gradle wrapper. Docker or a compatible runtime is required for Testcontainers and local Kind provisioning. Helm, kubectl, Kind, and Terraform are required for the local cluster workflow.
 
-Run fast tests and chart checks from the repository root:
+Run tests and chart checks from the repository root:
 
 ```bash
 cd apps/platform-engine
@@ -38,7 +38,7 @@ helm lint deploy/helm/event-driven-lab
 helm template event-driven-lab deploy/helm/event-driven-lab >/dev/null
 ```
 
-The Windows wrapper is `apps/platform-engine/gradlew.bat`. The full local orchestration entry point is `scripts/start-all.sh` or `scripts/start-all.ps1`; it builds an image, applies local Terraform, manages a Kubernetes secret, and installs the chart. Use it only against the intended local Kind context.
+The Windows wrapper is `apps/platform-engine/gradlew.bat`. To run the browser E2E, install its pinned browser first with `cd apps/platform-engine && ./gradlew installPlaywrightChromium`. The full local orchestration entry point is `scripts/start-all.sh` or `scripts/start-all.ps1`; it builds an image, applies local Terraform, manages a Kubernetes secret, and installs the chart. Use it only against the intended local Kind context.
 
 The local Terraform cluster and CI Kind cluster are both named `eventdrivenmicroservices-cluster`. CI builds and loads `platform-engine:local`, then installs chart `event-driven-lab` as release `event-driven-lab` in namespace `event-driven-lab`; the Helm image repository/tag overrides must remain aligned with that built image.
 
@@ -66,17 +66,17 @@ cd apps/platform-engine
 ./gradlew test --no-daemon
 ```
 
-`IntegrationTests` performs `SELECT 1` through the configured R2DBC `DatabaseClient`. The E2E suite asserts loan persistence, its outbox event, Kafka envelope/key delivery, processed state, and a ledger entry; a second case asserts Redis-backed high-value anomaly detection, anomaly outbox publication, alert-topic delivery, and `traceparent` preservation. Both tests prefer explicit `SPRING_R2DBC_*` and `SPRING_FLYWAY_*` endpoints when provided, with runtime-mapped Testcontainers URLs as the local fallback; Redis uses the CI service or a local Testcontainers container. Both backend E2E cases passed in CI on `195c0fe`; they do not establish browser behavior, full trace visualization, or durable storage across pod replacement.
+`IntegrationTests` performs `SELECT 1` through the configured R2DBC `DatabaseClient`. The E2E suite asserts loan persistence, outbox event, Kafka envelope/key delivery, processed state, ledger entry, Redis-backed anomaly detection, alert-topic delivery, `traceparent` preservation, duplicate-input idempotency, retention, and concurrent ledger integrity. A Playwright/Chromium case drives authenticated loan and transaction-anomaly workflows through the control room and checks the evidence table. These tests prefer explicit `SPRING_R2DBC_*` and `SPRING_FLYWAY_*` endpoints when provided, with runtime-mapped Testcontainers URLs as local fallback. They do not establish full Tempo UI navigation, every UI workflow, production availability, or independent-storage backup recovery.
 
-The anomaly E2E case also redelivers an event after its alert intent is durable and checks that only one row exists for that event ID. A local run on 2026-10-09 skipped both tests because docker-java defaulted to API 1.32 against a daemon minimum of 1.40; see the Java build status row for the workaround.
+The anomaly E2E case redelivers an event after its alert intent is durable, waits for consumer offset advancement, and checks that only one intent row exists for the event ID. CI run 38206550351 passed the no-skip integration-test gate. On compatible local Docker daemons whose API minimum is 1.40, use the `api.version=1.44` workaround above.
 
 ### Deployment and workflow evidence
 
-Helm lint/render checks establish template validity, not pod health. A fresh deployment should verify readiness, persistent data across a PostgreSQL pod restart, secret wiring, and the current application image. A workflow test should assert request result, anomaly, outbox processed state, Kafka alert, ledger hash verification, and trace evidence.
+Helm lint/render checks establish template validity, not pod health. CI's fresh Kind deployment verifies readiness, persistence across PostgreSQL pod replacement, manual backup/restore, CDC recovery, and the connector alert transition. Live Grafana panel queries, Redis outage recovery, live Kafka outage recovery, DLT operations, and the deterministic CDC publish/processed crash window remain unverified.
 
 ## Stability-to-Microservices Plan
 
-This is the ordered implementation plan. Complete each exit gate before advancing; record the CI run, test report, or operational result in **Current Status**. `195c0fe` is the latest baseline currently recorded as passing CI, including Testcontainers and Kind readiness.
+This is the dependency-ordered implementation plan. Gates 1–4 track CDC delivery, consumer recovery, data integrity, and operator workflow; record dated executable evidence in **Current Status** and keep unproven behavior open. Latest full no-skip baseline: CI run `38206550351` (commit `5383987`), with the control-room browser workflow additionally passing CI run `38204706720`.
 
 ### 0. Preserve the Verified Baseline — Complete
 
@@ -85,20 +85,20 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 - [x] CI PostgreSQL/Redis services, no-skip integration report gate, and successful Kind deployment/readiness.
 - [x] E2E CI coverage for loan -> PostgreSQL/outbox -> Kafka -> ledger and Redis anomaly -> alert topic with `traceparent`.
 
-**Exit evidence:** CI run `195c0fe` passed security, Java/Testcontainers, and Kind jobs. This verifies the current slices, not production availability or exactly-once delivery.
+**Exit evidence:** CI run `38206550351` passed security, Java/Testcontainers, and Kind jobs. This verifies the implemented lab slices, not production availability or exactly-once delivery.
 
-### 1. Activate Debezium CDC as the Sole Primary Publisher — Default as of 2026-10-12
+### 1. Activate Debezium CDC as the Sole Primary Publisher — Complete for the lab baseline
 
 - [x] Configure the Helm PostgreSQL workload for logical replication (`wal_level=logical`).
 - [x] Add an idempotent Helm hook to create the dedicated replication role and insert-only outbox publication from externally managed secrets.
 - [x] ~~Add a default-on `OUTBOX_POLLER_ENABLED` switch~~ — superseded by `OUTBOX_PUBLISHER_MODE` below; `OUTBOX_POLLER_ENABLED` no longer exists in code or the chart.
 - [x] Configure Connect's environment-backed secret provider and Secret reference, REST service, and health probes; keep the connector version tagged.
-- [x] Add a Helm-managed idempotent connector registration Job; it waits for connector and task state to become `RUNNING`. Isolated Kind registration and basic delivery were live-verified on 2026-10-09; connector restart was live-verified in CI on 2026-10-11. Connect pod loss and bridge-crash replay remain open.
+- [x] Add a Helm-managed idempotent connector registration Job; it waits for connector and task state to become `RUNNING`. Connector restart and Connect pod loss/recovery with a row written during the outage passed the Kind drills (runs 38182187800 and 38186479608).
 - [x] Map committed outbox inserts from the raw Debezium shadow topic to the established Kafka topic, key, `EventEnvelope`, event ID, and trace metadata. The publication emits inserts only, excluding `processed`, lock, and retry updates.
 - [x] Add a single `OUTBOX_PUBLISHER_MODE` (`cdc` by default since 2026-10-12, `poller` opt-in) so the scheduled relay and CDC bridge are mutually exclusive.
 - [x] Define `processed` in CDC mode as successfully published to the canonical Kafka topic, not consumer completion. A bridge crash after Kafka acknowledgement but before the database update can republish on replay; consumer idempotency is still required.
 
-**Exit gate:** Basic CDC-to-envelope delivery is verified in isolated Kind. Remaining gate: prove connector recreation/restart from stored offsets and duplicate/replay recovery with idempotent consumer effects (CDC is already the deployment default).
+**Exit evidence:** CI runs 38182187800 and 38186479608 verify CDC envelope delivery, connector restart, and recovery after Connect pod loss. CI run 38181492686 verifies replay of a canonical anomaly event produces one durable alert intent. This closes the deployment-default and basic recovery gate for the lab; the exact bridge publish/processed crash window and live Kafka outage recovery remain Gate 2 work, not claims of exactly-once delivery.
 
 ### 2. Make Consumers Replay-Safe and Failure-Tolerant — In Progress
 
@@ -109,11 +109,11 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 - [x] Configure indefinite one-second retries for transient listener failures; live outage recovery remains unverified.
 - [x] Add focused fault-injection tests for CDC Kafka outage recovery and publish-acknowledged/database-mark failure; replay uses the same event ID and envelope. Mocked Kafka/repository only; passed locally on 2026-10-11.
 - [x] Add listener redelivery-after-intent and alert-relay publish-acknowledged/database-mark failure tests. Unit tests passed locally on 2026-10-11; they do not prove actual process restart or downstream alert deduplication.
-- [x] Extend the PostgreSQL/Kafka E2E to send a duplicate anomaly event through the real listener topic and wait for the consumer-group offset to advance before asserting one alert intent. A local 2026-10-11 run skipped both E2E cases; CI execution is still required.
-- [x] Run the PostgreSQL/Kafka duplicate-delivery E2E without skips and verify the new group-offset assertion. Verified 2026-10-11 by CI run 38181492686 (commit cbcb72b), whose no-skip report gate passed.
+- [x] Extend the PostgreSQL/Kafka E2E to send a duplicate anomaly event through the real listener topic, wait for consumer-group offset advancement, and assert one alert intent. Verified without skips in CI run 38181492686; the later full suite and no-skip gate also passed in run 38206550351.
 - [x] Run the live Debezium connector restart drill in an ephemeral Kind CI job (`cdc-drill`, `scripts/cdc-drill.sh`). Passed 2026-10-11, run 38182187800.
-- [x] Extend the drill to Kafka Connect pod deletion and a bridge crash between canonical publish and the `processed` update. Verified 2026-10-12 (CI run 38186479608, commit `f2b2f6a`): a row written while the Connect pod is down is delivered exactly once after it returns (offsets live in Kafka topics), and a row followed by deletion of the platform pod ends `processed` with at least one canonical message (a replay may duplicate it, per the at-least-once contract). The bridge kill is not timed to the narrow publish-to-update window, so that window remains covered by the mocked `OutboxCdcBridgeTest` rather than a deterministic live fault.
-- [ ] Exercise connector restart, consumer crash between intent commit and offset commit, Kafka outage, and recovery. The relay may duplicate the alert if it crashes after Kafka acknowledgement but before marking the intent published; downstream alert consumers must deduplicate by `eventId`.
+- [x] Drill Connect pod loss and platform-pod recovery (CI run 38186479608). The platform pod is deleted after an outbox row is inserted; this is a process-recovery drill, not deterministic injection between Kafka acknowledgement and setting `processed`.
+- [ ] Deterministically fail the CDC bridge after canonical Kafka acknowledgement but before the `processed` update, then replay the same CDC row and assert at-least-once canonical delivery plus one durable anomaly intent.
+- [ ] Exercise consumer crash between alert-intent commit and input offset commit, live Kafka outage/recovery for both input and alert topics, and verify durable recovery. Alert-relay duplicates after Kafka acknowledgement remain possible; downstream alert consumers must deduplicate by `eventId`.
 - [ ] Measure bounded backlog/lag/recovery targets and define DLT inspection/replay operations.
 - [ ] Measure high-volume bursts and sustained throughput; specify bounded backlog, consumer lag, and recovery-time targets before claiming surge tolerance.
 

@@ -20,8 +20,8 @@ flowchart TD
     
     subgraph Data Consistency & Ledger
         API -->|Atomic Reactive Tx| PG[(PostgreSQL 15 R2DBC)]
-        PG -->|outbox_events| RELAY[Outbox Processor Relay - default mode]
-        PG -->|logical WAL - CDC mode| DEBEZIUM[Debezium PostgreSQL Connector]
+        PG -->|pending outbox rows - opt-in poller mode| RELAY[Outbox Processor Relay]
+        PG -->|logical WAL - default CDC mode| DEBEZIUM[Debezium PostgreSQL Connector]
         DEBEZIUM -->|raw row-change event| CDC[CDC shadow topic]
         CDC --> BRIDGE[CDC Envelope Bridge]
         BRIDGE -->|versioned EventEnvelope| KAFKA
@@ -29,7 +29,7 @@ flowchart TD
     end
 
     subgraph Streaming & Analytics
-        RELAY -->|Versioned EventEnvelope| KAFKA[Apache Kafka]
+        RELAY -->|Versioned EventEnvelope - opt-in poller mode| KAFKA[Apache Kafka]
         KAFKA -->|Kafka Consumer Group| LISTENER[Anomaly Event Listener]
         LISTENER -->|insertIfAbsent by eventId| ALERTBOX[(anomaly_alert_outbox)]
         ALERTBOX --> ALERTRELAY[Alert Outbox Relay]
@@ -59,12 +59,14 @@ The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom H
 * `POST /api/v1/telemetry`: High-throughput telemetry ingestion evaluating rolling Z-score outliers ($Z > 3.0$).
 * `GET /api/v1/ledger`: Retrieves chronological ledger event history with hash proofs.
 * `GET /api/v1/ledger/latest-hash`: Exposes the latest cryptographic head of the SHA-256 chain.
-* `GET /api/v1/ledger/verify`: Recomputes the full chain in append order and returns `valid`, `eventsChecked`, and the first invalid event ID and reason, if any. Optional `?recent=N` limits it to the latest N events (response `scope`). `ConnectorStateMonitor` polls Kafka Connect and exposes connector/task gauges that drive the `DebeziumConnectorNotRunning` and `DebeziumTaskFailed` alerts.
+* `GET /api/v1/ledger/verify`: Recomputes the full chain in append order and returns `valid`, `eventsChecked`, and the first invalid event ID and reason, if any. Optional `?recent=N` limits it to the latest N events (response `scope`).
 * `GET /api/v1/outbox/status`: Returns current outbox backlog depth, oldest unprocessed record timestamp, and queue age.
 * `GET /`: Interactive web control room serving static WebFlux resources for operators and live demos. A Playwright/Chromium integration test exercises loan submission and transaction-anomaly evidence through the browser.
 
+`ConnectorStateMonitor` polls Kafka Connect and exposes connector/task gauges that drive the `DebeziumConnectorNotRunning` and `DebeziumTaskFailed` alerts.
+
 ### Context Propagation
-Every HTTP response includes an `X-Correlation-Id` header (generated or preserved from client requests) and an `X-Trace-Id` header when the filter observes an active OpenTelemetry span. End-to-end trace continuity is not currently verified.
+Every HTTP response includes an `X-Correlation-Id` header (generated or preserved from client requests) and an `X-Trace-Id` header when the filter observes an active OpenTelemetry span. The CI CDC drill verifies that the HTTP, ledger, CDC publish, and consumer spans share one Tempo trace. This is a focused workflow check, not coverage of every event path; the control room does not yet link to traces.
 
 ---
 
@@ -73,7 +75,7 @@ Every HTTP response includes an `X-Correlation-Id` header (generated or preserve
 To provide at-least-once delivery without distributed two-phase commit:
 1. **Atomic Dual-Write:** The business entity and the corresponding outbox record are committed together in a single PostgreSQL R2DBC transaction.
 2. **Selectable Publisher:** `OUTBOX_PUBLISHER_MODE` is `cdc` by default. In opt-in `poller` mode, a background publisher queries pending events in batches of up to 50, claims leases, publishes sequentially, and isolates per-event failures with capped exponential retry delay. In the default `cdc` mode, PostgreSQL logical replication feeds Debezium's insert-only shadow topic; the CDC bridge maps the row to the same envelope and canonical topic, waits for Kafka acknowledgement, then sets `processed` to mean published (not consumer-processed). The two publishers are mutually exclusive.
-3. **Kafka Header Injection:** When present, the stored W3C `traceparent` is injected into the Kafka record header. This is partial propagation, not a verified end-to-end trace.
+3. **Kafka Header Injection:** When present, the stored W3C `traceparent` is injected into the Kafka record header. The CDC drill verifies continuity across its HTTP, ledger, publish, and consumer spans; other paths are not thereby verified.
 4. **Contract Envelope:** Payloads are serialized using the current `EventEnvelope` schema (`eventVersion`):
    ```json
    {
@@ -88,7 +90,7 @@ To provide at-least-once delivery without distributed two-phase commit:
    }
    ```
 
-  CDC's canonical publish and the subsequent `processed` update are not a distributed transaction. If the bridge publishes and then fails before updating PostgreSQL, replay can publish the same event again; consumers must deduplicate by stable `eventId`. Connector restart/replay and consumer idempotency are not yet verified.
+  CDC's canonical publish and the subsequent `processed` update are not a distributed transaction. If the bridge publishes and then fails before updating PostgreSQL, replay can publish the same event again; consumers must deduplicate by stable `eventId`. CI Kind drills verify connector restart and recovery after Connect pod loss, while the PostgreSQL/Kafka E2E verifies that duplicate anomaly input creates one durable alert intent. The exact publish-acknowledged/`processed`-update failure window has only mocked coverage, and downstream alert consumers still need idempotency.
 
 ---
 
@@ -121,6 +123,6 @@ The local lab stack is packaged in the canonical Helm chart `deploy/helm/event-d
 * **Grafana Tempo:** Distributed trace storage supporting traceparent lookups.
 * **Prometheus:** Metrics scraping endpoint monitoring throughput, JVM metrics, and custom anomaly counters.
 * **Grafana Loki:** Centralized log aggregation across all Kubernetes pods.
-* **Grafana:** Dashboards pre-provisioned with Prometheus, Tempo, and Loki datasources.
+* **Grafana:** Dashboards pre-provisioned with Prometheus, Tempo, and Loki datasources. The CDC drill verifies metric scraping and one connector alert firing/clearing, but live dashboard query validation and firing/clearing of the remaining alerts are outstanding.
 * **Local deployment status:** The platform container runs non-root with a read-only root filesystem and external database/JWT secret references. PostgreSQL is a single-replica Deployment backed by a PersistentVolumeClaim (`postgres.persistence`, default 5Gi; pod-replacement durability and manual backup/restore drills pass in CI), but has no scheduled/off-site backups or HA; several infrastructure images use `latest`, and not all pods have probes or equivalent hardening. Treat this chart as a local lab, not production-ready deployment configuration.
 Current verification evidence and implementation priorities live in [engineering-guide.md](engineering-guide.md).
