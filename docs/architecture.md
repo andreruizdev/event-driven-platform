@@ -90,7 +90,7 @@ To provide at-least-once delivery without distributed two-phase commit:
    }
    ```
 
-  CDC's canonical publish and the subsequent `processed` update are not a distributed transaction. If the bridge publishes and then fails before updating PostgreSQL, replay can publish the same event again; consumers must deduplicate by stable `eventId`. CI Kind drills verify connector restart and recovery after Connect pod loss, while the PostgreSQL/Kafka E2E verifies that duplicate anomaly input creates one durable alert intent. The exact publish-acknowledged/`processed`-update failure window has only mocked coverage, and downstream alert consumers still need idempotency.
+  CDC's canonical publish and the subsequent `processed` update are not a distributed transaction. If the bridge publishes and then fails before updating PostgreSQL, replay can publish the same event again; consumers must deduplicate by stable `eventId`. CI Kind drills verify connector restart and recovery after Connect pod loss. A Docker-backed E2E injects a real PostgreSQL trigger failure after Kafka acknowledgement, replays the same CDC record through the bridge, and verifies duplicate canonical publication with one durable anomaly alert intent. This does not exercise Debezium source-offset replay or consumer process restart; downstream alert consumers still need idempotency.
 
 ---
 

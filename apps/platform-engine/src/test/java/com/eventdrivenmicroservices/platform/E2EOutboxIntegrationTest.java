@@ -5,7 +5,10 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyAlertOutboxRepository;
+import com.eventdrivenmicroservices.platform.infrastructure.kafka.OutboxCdcBridge;
+import com.eventdrivenmicroservices.platform.infrastructure.observability.OutboxMetrics;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.EventEnvelope;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.LedgerEventRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.LoanApplicationRepository;
@@ -19,6 +22,7 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.junit.jupiter.api.Assertions;
@@ -37,6 +41,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -251,7 +256,112 @@ public class E2EOutboxIntegrationTest {
         Assertions.assertNotNull(ledgerEvent);
     }
 
+    @Test
+    void cdcReplayAfterKafkaAcknowledgementAndDatabaseFailurePublishesDuplicateButOneAlertIntent()
+            throws Exception {
+        UUID eventId = UUID.randomUUID();
+        String aggregateId = "cdc-replay-" + eventId;
+        Instant createdAt = Instant.now();
+        String payload = "{\"transactionId\":\"" + eventId + "\",\"amount\":15000}";
+        databaseClient.sql("""
+                        INSERT INTO outbox_events
+                            (id, aggregate_type, aggregate_id, event_type, payload, traceparent,
+                             processed, created_at, locked_by, locked_until)
+                        VALUES
+                            (:id, 'FinancialTransaction', :aggregateId, 'TransactionAnomalyDetected',
+                             :payload, :traceparent, false, :createdAt, 'cdc-crash-window-drill', :lockedUntil)
+                        """)
+                .bind("id", eventId)
+                .bind("aggregateId", aggregateId)
+                .bind("payload", payload)
+                .bind("traceparent", TRACEPARENT)
+                .bind("createdAt", createdAt)
+                .bind("lockedUntil", createdAt.plus(Duration.ofMinutes(10)))
+                .then().block(Duration.ofSeconds(5));
+
+        OutboxCdcBridge bridge = new OutboxCdcBridge(objectMapper, kafkaTemplate, outboxEventRepository,
+                new OutboxMetrics(new SimpleMeterRegistry()));
+        ConsumerRecord<String, String> cdcRecord = new ConsumerRecord<>(
+                "eventdrivenmicroservices_cdc.public.outbox_events",
+                0,
+                0L,
+                "",
+                objectMapper.writeValueAsString(Map.of(
+                        "op", "c",
+                        "after", Map.of(
+                                "id", eventId.toString(),
+                                "aggregate_type", "FinancialTransaction",
+                                "aggregate_id", aggregateId,
+                                "event_type", "TransactionAnomalyDetected",
+                                "payload", payload,
+                                "traceparent", TRACEPARENT,
+                                "created_at", createdAt.toString()))));
+
+        try {
+            installProcessedFailureTrigger(eventId);
+            Assertions.assertThrows(Exception.class, () -> bridge.forward(cdcRecord),
+                    "the DB update must fail only after Kafka acknowledges the canonical publish");
+            var afterFailedMark = outboxEventRepository.findById(eventId).block(Duration.ofSeconds(5));
+            Assertions.assertNotNull(afterFailedMark);
+            Assertions.assertFalse(afterFailedMark.isProcessed());
+
+            List<ConsumerRecord<String, String>> firstAttempt = consumeKafkaRecords(
+                    "eventdrivenmicroservices-outbox-events", eventId, 1);
+            EventEnvelope firstEnvelope = objectMapper.readValue(firstAttempt.get(0).value(), EventEnvelope.class);
+            Assertions.assertEquals(eventId, firstEnvelope.eventId());
+
+            removeProcessedFailureTrigger();
+            bridge.forward(cdcRecord);
+
+            List<ConsumerRecord<String, String>> replayed = consumeKafkaRecords(
+                    "eventdrivenmicroservices-outbox-events", eventId, 2);
+            Assertions.assertEquals(firstAttempt.get(0).value(), replayed.get(1).value());
+            Assertions.assertNotEquals(firstAttempt.get(0).offset(), replayed.get(1).offset());
+            awaitProcessed(eventId);
+            awaitConsumerCommit(replayed.get(1));
+            awaitAlertIntent(eventId);
+            Assertions.assertEquals(1, countAlertIntents(eventId));
+        } finally {
+            removeProcessedFailureTrigger();
+        }
+    }
+
+    private void installProcessedFailureTrigger(UUID eventId) {
+        databaseClient.sql("""
+                        CREATE OR REPLACE FUNCTION e2e_fail_processed_mark() RETURNS trigger
+                        LANGUAGE plpgsql AS $function$
+                        BEGIN
+                            IF NEW.id = '%s'::uuid AND NEW.processed AND NOT OLD.processed THEN
+                                RAISE EXCEPTION 'injected CDC processed-mark failure';
+                            END IF;
+                            RETURN NEW;
+                        END;
+                        $function$
+                        """.formatted(eventId))
+                .then().block(Duration.ofSeconds(5));
+        databaseClient.sql("DROP TRIGGER IF EXISTS e2e_fail_processed_mark ON outbox_events")
+                .then().block(Duration.ofSeconds(5));
+        databaseClient.sql("""
+                        CREATE TRIGGER e2e_fail_processed_mark
+                        BEFORE UPDATE ON outbox_events
+                        FOR EACH ROW EXECUTE FUNCTION e2e_fail_processed_mark()
+                        """)
+                .then().block(Duration.ofSeconds(5));
+    }
+
+    private void removeProcessedFailureTrigger() {
+        databaseClient.sql("DROP TRIGGER IF EXISTS e2e_fail_processed_mark ON outbox_events")
+                .then().block(Duration.ofSeconds(5));
+        databaseClient.sql("DROP FUNCTION IF EXISTS e2e_fail_processed_mark()")
+                .then().block(Duration.ofSeconds(5));
+    }
+
     private ConsumerRecord<String, String> consumeKafkaRecord(String topic, UUID eventId) throws Exception {
+        return consumeKafkaRecords(topic, eventId, 1).get(0);
+    }
+
+    private List<ConsumerRecord<String, String>> consumeKafkaRecords(String topic, UUID eventId, int count)
+            throws Exception {
         Properties properties = new Properties();
         properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
         properties.put(ConsumerConfig.GROUP_ID_CONFIG, "e2e-outbox-" + UUID.randomUUID());
@@ -261,18 +371,23 @@ public class E2EOutboxIntegrationTest {
 
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(properties)) {
             consumer.subscribe(List.of(topic));
+            List<ConsumerRecord<String, String>> matches = new ArrayList<>();
             Instant deadline = Instant.now().plusSeconds(30);
-            while (Instant.now().isBefore(deadline)) {
+            while (Instant.now().isBefore(deadline) && matches.size() < count) {
                 for (ConsumerRecord<String, String> record : consumer.poll(Duration.ofMillis(250))) {
                     EventEnvelope envelope = objectMapper.readValue(record.value(), EventEnvelope.class);
                     if (eventId.equals(envelope.eventId())) {
-                        return record;
+                        matches.add(record);
+                        if (matches.size() == count) {
+                            return matches;
+                        }
                     }
-            }
+                }
             }
         }
 
-        throw new AssertionError("Event was not published to topic " + topic + " within 30 seconds: " + eventId);
+        throw new AssertionError("Expected " + count + " records for event " + eventId
+                + " on topic " + topic + " within 30 seconds");
     }
 
     @Autowired
@@ -358,8 +473,14 @@ public class E2EOutboxIntegrationTest {
             duplicate.headers().add("traceparent", traceparent.value());
         }
         var metadata = kafkaTemplate.send(duplicate).get(30, TimeUnit.SECONDS).getRecordMetadata();
-        TopicPartition topicPartition = new TopicPartition(metadata.topic(), metadata.partition());
+        awaitConsumerCommit(new TopicPartition(metadata.topic(), metadata.partition()), metadata.offset());
+    }
 
+    private void awaitConsumerCommit(ConsumerRecord<String, String> record) throws Exception {
+        awaitConsumerCommit(new TopicPartition(record.topic(), record.partition()), record.offset());
+    }
+
+    private void awaitConsumerCommit(TopicPartition topicPartition, long recordOffset) throws Exception {
         Properties properties = new Properties();
         properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
         try (AdminClient adminClient = AdminClient.create(properties)) {
@@ -369,7 +490,7 @@ public class E2EOutboxIntegrationTest {
                                 .partitionsToOffsetAndMetadata()
                                 .get(5, TimeUnit.SECONDS);
                         var committed = offsets.get(topicPartition);
-                        return committed != null && committed.offset() > metadata.offset();
+                        return committed != null && committed.offset() > recordOffset;
                     })
                     .filter(Boolean::booleanValue)
                     .repeatWhenEmpty(retries -> retries.delayElements(Duration.ofMillis(100)).take(50)))
