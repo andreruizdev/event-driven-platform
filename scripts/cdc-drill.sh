@@ -12,6 +12,7 @@ TIMEOUT="${DRILL_TIMEOUT_SECONDS:-90}"
 KAFKA_OUTAGE_ACTIVE=false
 PF_APP=""
 PF_TEMPO=""
+PF_PROM=""
 
 pg() {
   kubectl exec -n "$NS" deploy/eventdrivenmicroservices-postgres -- \
@@ -68,6 +69,9 @@ is_unprocessed() {
    fi
    if [ -n "$PF_TEMPO" ]; then
      port_forward_pids+=("$PF_TEMPO")
+   fi
+   if [ -n "$PF_PROM" ]; then
+     port_forward_pids+=("$PF_PROM")
    fi
    if [ "${#port_forward_pids[@]}" -gt 0 ]; then
      kill "${port_forward_pids[@]}" 2>/dev/null || true
@@ -199,6 +203,12 @@ fi
 prom() {
   kubectl exec -n "$NS" deploy/eventdrivenmicroservices-prometheus -- wget -qO- "http://localhost:9090$1"
 }
+prom_query() {
+  curl -fsSG "http://localhost:19090/api/v1/query" --data-urlencode "query=$1"
+}
+prom_query_valid() {
+  prom_query "$1" | grep -q '"status":"success"'
+}
 rules_healthy() {
   local rules
   rules="$(prom /api/v1/rules)"
@@ -212,9 +222,34 @@ for metric in eventdrivenmicroservices_outbox_pending eventdrivenmicroservices_o
               eventdrivenmicroservices_replication_slot_retained_bytes eventdrivenmicroservices_replication_slot_inactive \
               eventdrivenmicroservices_replication_slot_count eventdrivenmicroservices_outbox_publish_success_total \
               kafka_consumer_fetch_manager_records_lag_max eventdrivenmicroservices_connector_running \
-              eventdrivenmicroservices_connector_tasks_failed; do
+              eventdrivenmicroservices_connector_tasks_running eventdrivenmicroservices_connector_tasks_failed \
+              eventdrivenmicroservices_outbox_publish_duration_seconds_bucket eventdrivenmicroservices_outbox_retry_total \
+              eventdrivenmicroservices_outbox_processing_failure_total; do
   wait_for "metric ${metric} scraped" metric_present "$metric"
 done
+kubectl -n "$NS" port-forward svc/eventdrivenmicroservices-prometheus 19090:9090 >/dev/null 2>&1 &
+PF_PROM=$!
+wait_for "Prometheus query API port-forward" prom_query_valid eventdrivenmicroservices_connector_running
+for query in \
+    'rate(eventdrivenmicroservices_anomalies_detected_total[1m])' \
+    'eventdrivenmicroservices_anomaly_latest_zscore' \
+    'sum(rate(http_server_requests_seconds_count[1m])) by (uri, status)' \
+    'eventdrivenmicroservices_outbox_pending' \
+    'eventdrivenmicroservices_outbox_oldest_pending_age_seconds' \
+    'rate(eventdrivenmicroservices_outbox_publish_success_total[5m])' \
+    'rate(eventdrivenmicroservices_outbox_processing_failure_total[5m])' \
+    'rate(eventdrivenmicroservices_outbox_retry_total[5m])' \
+    'histogram_quantile(0.95, sum(rate(eventdrivenmicroservices_outbox_publish_duration_seconds_bucket[5m])) by (le))' \
+    'eventdrivenmicroservices_connector_running' \
+    'eventdrivenmicroservices_connector_tasks_running' \
+    'eventdrivenmicroservices_connector_tasks_failed' \
+    'max(kafka_consumer_fetch_manager_records_lag_max)' \
+    'eventdrivenmicroservices_replication_slot_retained_bytes' \
+    'eventdrivenmicroservices_replication_slot_inactive' \
+    'eventdrivenmicroservices_replication_slot_count'; do
+  wait_for "live Prometheus query is valid: ${query}" prom_query_valid "$query"
+done
+echo "OK: live Prometheus accepted every dashboard PromQL expression"
 slot_count="$(prom '/api/v1/query?query=eventdrivenmicroservices_replication_slot_count' | grep -oE '"value":\[[^]]*\]' | grep -oE '"[0-9.]+"\]$' | tr -d '"]')"
 if [ "${slot_count%.*}" -lt 1 ]; then
   echo "FAIL: expected an active logical replication slot, gauge reports ${slot_count}" >&2

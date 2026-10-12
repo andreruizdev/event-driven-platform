@@ -63,7 +63,7 @@ class TransactionProcessingServiceTest {
         when(anomalyDetector.evaluateTransactionVelocity(any(), any())).thenReturn(Mono.just(AnomalyScore.normal()));
 
         // Act & Assert
-        StepVerifier.create(service.processTransactionAsync(payload, "trace-01"))
+        StepVerifier.create(service.processTransactionAsync(payload, "trace-01", "correlation-01"))
             .expectErrorMessage("Failed to serialize transaction event")
             .verify();
             

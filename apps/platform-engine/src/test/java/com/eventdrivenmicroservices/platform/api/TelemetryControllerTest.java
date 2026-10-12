@@ -38,17 +38,19 @@ public class TelemetryControllerTest {
                 "{\"cpu_load\": 45.2, \"mem_usage\": 12.8}"
         );
 
-        Mockito.when(processingService.processPayloadAsync(any(TelemetryPayload.class)))
+        Mockito.when(processingService.processPayloadAsync(any(TelemetryPayload.class), any()))
                 .thenReturn(Mono.empty());
 
         webTestClient.post()
                 .uri("/api/v1/telemetry")
                 .headers(headers -> headers.setBasicAuth("admin", "test"))
+                .header("X-Correlation-Id", "telemetry-correlation")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .exchange()
                 .expectStatus().isAccepted();
 
-        Mockito.verify(processingService, Mockito.times(1)).processPayloadAsync(any(TelemetryPayload.class));
+        Mockito.verify(processingService, Mockito.times(1)).processPayloadAsync(
+                any(TelemetryPayload.class), org.mockito.ArgumentMatchers.eq("telemetry-correlation"));
     }
 }

@@ -45,12 +45,13 @@ public class LoanControllerTest {
         response.setStatus("PENDING_REVIEW");
         response.setCreatedAt(Instant.now());
 
-        Mockito.when(loanService.submitApplication(any(LoanApplicationRequest.class)))
+        Mockito.when(loanService.submitApplication(any(LoanApplicationRequest.class), any()))
                 .thenReturn(Mono.just(response));
 
         webTestClient.post()
                 .uri("/api/v1/loans")
                 .headers(headers -> headers.setBasicAuth("admin", "test"))
+                .header("X-Correlation-Id", "loan-correlation")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request)
                 .exchange()

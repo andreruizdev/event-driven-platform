@@ -10,6 +10,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
 
@@ -21,8 +22,10 @@ public class LoanController {
     private final LoanService loanService;
 
     @PostMapping
-    public Mono<ResponseEntity<LoanApplication>> submit(@Valid @RequestBody LoanApplicationRequest request) {
-        return loanService.submitApplication(request)
+    public Mono<ResponseEntity<LoanApplication>> submit(
+            @Valid @RequestBody LoanApplicationRequest request,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
+        return loanService.submitApplication(request, correlationId)
                 .map(ResponseEntity::ok);
     }
 }

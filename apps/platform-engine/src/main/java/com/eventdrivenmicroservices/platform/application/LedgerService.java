@@ -28,6 +28,11 @@ public class LedgerService {
     private static final String APPEND_LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtext('ledger_events'))";
 
     public Mono<LedgerEvent> appendToLedger(String transactionType, String payload) {
+        return appendToLedger(transactionType, payload, null, null);
+    }
+
+    public Mono<LedgerEvent> appendToLedger(
+            String transactionType, String payload, UUID outboxEventId, String correlationId) {
         return databaseClient.sql(APPEND_LOCK_SQL).fetch().all().then(ledgerEventRepository.findLatestHash())
                 .defaultIfEmpty(GENESIS_HASH)
                 .flatMap(previousHash -> {
@@ -37,6 +42,8 @@ public class LedgerService {
                     LedgerEvent event = LedgerEvent.builder()
                             .transactionType(transactionType)
                             .payload(payload)
+                            .outboxEventId(outboxEventId)
+                            .correlationId(correlationId)
                             .previousHash(previousHash)
                             .currentHash(currentHash)
                             .build();

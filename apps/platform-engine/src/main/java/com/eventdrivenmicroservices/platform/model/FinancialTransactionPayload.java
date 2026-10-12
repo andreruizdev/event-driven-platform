@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.time.OffsetDateTime;
+import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 
 @Data
@@ -17,6 +18,7 @@ public class FinancialTransactionPayload {
     private String ipAddress;
     private String geolocation;
     private String deviceFingerprint;
+    @Size(max = 255)
     private String correlationId;
     private String settlementStatus;
     private OffsetDateTime timestamp;

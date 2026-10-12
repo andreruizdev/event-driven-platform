@@ -75,14 +75,22 @@
           <div><h3>Outbox status</h3><pre id="outboxResult" class="result">No data loaded.</pre></div>
           <div><h3>Latest ledger hash</h3><pre id="hashResult" class="result">No data loaded.</pre></div>
         </div>
+        <h3>Workflow timeline</h3>
+        <div class="timeline-lookup">
+          <label>Event ID <input id="timelineEventId" autocomplete="off" placeholder="Outbox event UUID"></label>
+          <label>Correlation ID <input id="timelineCorrelationId" autocomplete="off" placeholder="Request correlation ID"></label>
+          <button id="loadTimeline" class="button secondary">Load timeline</button>
+        </div>
+        <p id="timelineStatus" class="state-message" role="status" aria-live="polite">Enter an event ID or correlation ID, or open one from recent events.</p>
+        <ol id="workflowTimeline" class="workflow-timeline" aria-label="Event workflow timeline"></ol>
         <h3>Recent outbox events</h3>
         <div class="table-scroll">
           <table class="event-table">
-            <thead><tr><th>Event</th><th>Aggregate</th><th>Created</th><th>Status</th><th>Retries</th></tr></thead>
-            <tbody id="recentEventsBody"><tr><td colspan="5">No data loaded.</td></tr></tbody>
+            <thead><tr><th>Event</th><th>Aggregate</th><th>Event ID</th><th>Correlation ID</th><th>Created</th><th>Status</th><th>Retries</th><th>Timeline</th></tr></thead>
+            <tbody id="recentEventsBody"><tr><td colspan="8">No data loaded.</td></tr></tbody>
           </table>
         </div>
-        <h3>Ledger events</h3>
+        <h3>Ledger integrity</h3>
         <pre id="ledgerResult" class="result ledger">No data loaded.</pre>
       </article>
     </section>

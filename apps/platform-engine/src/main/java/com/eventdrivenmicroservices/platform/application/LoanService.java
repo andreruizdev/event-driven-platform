@@ -25,7 +25,7 @@ public class LoanService {
     private final TraceSupport traceSupport;
 
     @Transactional
-    public Mono<LoanApplication> submitApplication(LoanApplicationRequest request) {
+    public Mono<LoanApplication> submitApplication(LoanApplicationRequest request, String correlationId) {
         dynamicLoanValidator.validate(request);
 
         LoanApplication application = new LoanApplication();
@@ -34,6 +34,7 @@ public class LoanService {
         application.setTermMonths(request.getTermMonths());
         application.setCreatedAt(Instant.now());
         application.setStatus("PENDING_REVIEW");
+        application.setCorrelationId(correlationId);
 
         return loanRepository.save(application)
             .flatMap(savedApp -> {
@@ -50,12 +51,13 @@ public class LoanService {
                     event.setAggregateId(savedApp.getId().toString());
                     event.setEventType("ApplicationSubmitted");
                     event.setPayload(payload);
+                    event.setCorrelationId(correlationId);
                     event.setTraceparent(traceparent.isEmpty() ? null : traceparent);
                     event.setCreatedAt(Instant.now());
 
                     return outboxRepository.save(event)
                             .flatMap(savedEvent -> traceSupport.traced("ledger.append",
-                                    ledgerService.appendToLedger("ApplicationSubmitted", payload)))
+                                    ledgerService.appendToLedger("ApplicationSubmitted", payload, savedEvent.getId(), correlationId)))
                             .thenReturn(savedApp);
                 });
             });

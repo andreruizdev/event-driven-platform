@@ -61,12 +61,14 @@ The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom H
 * `GET /api/v1/ledger/latest-hash`: Exposes the latest cryptographic head of the SHA-256 chain.
 * `GET /api/v1/ledger/verify`: Recomputes the full chain in append order and returns `valid`, `eventsChecked`, and the first invalid event ID and reason, if any. Optional `?recent=N` limits it to the latest N events (response `scope`).
 * `GET /api/v1/outbox/status`: Returns current outbox backlog depth, oldest unprocessed record timestamp, and queue age.
-* `GET /`: Interactive web control room serving static WebFlux resources for operators and live demos. A Playwright/Chromium integration test exercises loan submission and transaction-anomaly evidence through the browser.
+* `GET /api/v1/outbox/recent`: Returns up to 20 event summaries without payloads or raw error text.
+* `GET /api/v1/outbox/timeline?eventId=...` or `?correlationId=...`: Returns sanitized accepted, persisted, published, retry, anomaly-alert, ledger, and trace evidence for an outbox workflow. Exactly one lookup key is required; correlation lookups return up to 20 recent events.
+* `GET /`: Interactive web control room serving static WebFlux resources for operators and live demos. It exposes outbox/ledger integrity summaries and event timelines without rendering business payloads or raw failure text.
 
 `ConnectorStateMonitor` polls Kafka Connect and exposes connector/task gauges that drive the `DebeziumConnectorNotRunning` and `DebeziumTaskFailed` alerts.
 
 ### Context Propagation
-Every HTTP response includes an `X-Correlation-Id` header (generated or preserved from client requests) and an `X-Trace-Id` header when the filter observes an active OpenTelemetry span. The CI CDC drill verifies that the HTTP, ledger, CDC publish, and consumer spans share one Tempo trace. This is a focused workflow check, not coverage of every event path; the control room does not yet link to traces.
+Every HTTP response includes an `X-Correlation-Id` header (generated or preserved from client requests) and an `X-Trace-Id` header when the filter observes an active OpenTelemetry span. The correlation filter also propagates that ID into the request path; loans, transactions, and telemetry persist it with their outbox event. Migration V7 links ledger rows to their originating outbox event. The control-room timeline returns a trace ID when a valid `traceparent` is stored and links it to Grafana Explore. The CI CDC drill verifies that the HTTP, ledger, CDC publish, and consumer spans share one Tempo trace.
 
 ---
 
@@ -123,6 +125,6 @@ The local lab stack is packaged in the canonical Helm chart `deploy/helm/event-d
 * **Grafana Tempo:** Distributed trace storage supporting traceparent lookups.
 * **Prometheus:** Metrics scraping endpoint monitoring throughput, JVM metrics, and custom anomaly counters.
 * **Grafana Loki:** Centralized log aggregation across all Kubernetes pods.
-* **Grafana:** Dashboards pre-provisioned with Prometheus, Tempo, and Loki datasources. The CDC drill verifies metric scraping and one connector alert firing/clearing, but live dashboard query validation and firing/clearing of the remaining alerts are outstanding.
+* **Grafana:** Dashboards pre-provisioned with Prometheus, Tempo, and Loki datasources. Panels use emitted application, connector/task, replication-slot, Kafka consumer-lag, and outbox publish signals. The CDC drill validates dashboard PromQL against the live Prometheus query API and verifies one connector alert firing/clearing; rendered-panel visual inspection and firing/clearing of the remaining alerts are outstanding.
 * **Local deployment status:** The platform container runs non-root with a read-only root filesystem and external database/JWT secret references. PostgreSQL is a single-replica Deployment backed by a PersistentVolumeClaim (`postgres.persistence`, default 5Gi; pod-replacement durability and manual backup/restore drills pass in CI), but has no scheduled/off-site backups or HA; several infrastructure images use `latest`, and not all pods have probes or equivalent hardening. Treat this chart as a local lab, not production-ready deployment configuration.
 Current verification evidence and implementation priorities live in [engineering-guide.md](engineering-guide.md).

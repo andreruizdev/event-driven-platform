@@ -5,5 +5,5 @@ import com.eventdrivenmicroservices.platform.model.TelemetryPayload;
 import reactor.core.publisher.Mono;
 
 public interface TelemetryProcessingService {
-    Mono<Void> processPayloadAsync(TelemetryPayload payload);
+    Mono<Void> processPayloadAsync(TelemetryPayload payload, String correlationId);
 }

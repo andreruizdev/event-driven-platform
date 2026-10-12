@@ -49,9 +49,12 @@ public class TransactionProcessingServiceImpl implements TransactionProcessingSe
 
     @Override
     @Transactional
-    public Mono<Void> processTransactionAsync(FinancialTransactionPayload payload, String traceparent) {
+    public Mono<Void> processTransactionAsync(FinancialTransactionPayload payload, String traceparent, String requestCorrelationId) {
         log.info("Processing financial transaction: {} amount: {}", safe(payload.getTransactionId()), payload.getAmount());
-        
+
+        String correlationId = payload.getCorrelationId() == null || payload.getCorrelationId().isBlank()
+                ? requestCorrelationId
+                : payload.getCorrelationId();
         FinancialTransaction event = new FinancialTransaction();
         event.setTransactionId(payload.getTransactionId());
         event.setAmount(payload.getAmount());
@@ -60,7 +63,7 @@ public class TransactionProcessingServiceImpl implements TransactionProcessingSe
         event.setIpAddress(payload.getIpAddress());
         event.setGeolocation(payload.getGeolocation());
         event.setDeviceFingerprint(payload.getDeviceFingerprint());
-        event.setCorrelationId(payload.getCorrelationId());
+        event.setCorrelationId(correlationId);
         event.setSettlementStatus(payload.getSettlementStatus());
         event.setTimestamp(payload.getTimestamp() != null ? payload.getTimestamp() : OffsetDateTime.now());
         
@@ -84,6 +87,7 @@ public class TransactionProcessingServiceImpl implements TransactionProcessingSe
                         outboxEvent.setAggregateId(savedEvent.getId().toString());
                         outboxEvent.setEventType(eventType);
                         outboxEvent.setPayload(payloadStr);
+                        outboxEvent.setCorrelationId(correlationId);
                         outboxEvent.setCreatedAt(Instant.now());
 
                         return traceSupport.currentTraceparent().defaultIfEmpty(traceparent == null ? "" : traceparent)
@@ -92,9 +96,10 @@ public class TransactionProcessingServiceImpl implements TransactionProcessingSe
                                     Mono<OutboxEvent> saveOutbox = outboxRepository.save(outboxEvent);
                                     if (anomalyScore.isAnomaly()) {
                                         log.warn("[ANOMALY REACTION] Financial velocity anomaly flagged for merchant: {}", safe(trackerKey));
-                                        return traceSupport.traced("ledger.append",
-                                                ledgerService.appendEvent("ANOMALY_FLAGGED", payloadStr))
-                                                .then(saveOutbox);
+                                        return saveOutbox.flatMap(savedOutbox -> traceSupport.traced("ledger.append",
+                                                ledgerService.appendToLedger("ANOMALY_FLAGGED", payloadStr,
+                                                        savedOutbox.getId(), correlationId))
+                                                .thenReturn(savedOutbox));
                                     }
                                     return saveOutbox;
                                 });

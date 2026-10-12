@@ -20,6 +20,10 @@ public class LoanApplication {
     private BigDecimal amount;
     private Integer termMonths;
     private String status;
+
+    @Column("correlation_id")
+    private String correlationId;
+
     private Instant createdAt;
     
     // R2DBC doesn't support @PrePersist, handle in service layer

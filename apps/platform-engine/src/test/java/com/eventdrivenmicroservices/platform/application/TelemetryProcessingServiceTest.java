@@ -63,7 +63,7 @@ class TelemetryProcessingServiceTest {
         when(anomalyDetector.evaluateTelemetryZScore(any(), anyDouble())).thenReturn(Mono.just(AnomalyScore.normal()));
 
         // Act & Assert
-        StepVerifier.create(service.processPayloadAsync(payload))
+        StepVerifier.create(service.processPayloadAsync(payload, "telemetry-correlation"))
             .expectErrorMessage("Failed to serialize telemetry event")
             .verify();
             

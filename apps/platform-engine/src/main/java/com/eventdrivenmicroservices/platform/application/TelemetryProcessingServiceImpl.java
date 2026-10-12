@@ -13,6 +13,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEvent;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEventRepository;
+import com.eventdrivenmicroservices.platform.infrastructure.observability.TraceSupport;
 import reactor.core.publisher.Mono;
 import java.time.Instant;
 
@@ -25,6 +26,7 @@ public class TelemetryProcessingServiceImpl implements TelemetryProcessingServic
     private final LedgerService ledgerService;
     private final StreamingAnomalyDetector anomalyDetector;
     private final ObjectMapper objectMapper;
+    private TraceSupport traceSupport = TraceSupport.noop();
 
     @Autowired
     public TelemetryProcessingServiceImpl(TelemetryEventRepository repository,
@@ -39,6 +41,11 @@ public class TelemetryProcessingServiceImpl implements TelemetryProcessingServic
         this.objectMapper = objectMapper;
     }
 
+    @Autowired(required = false)
+    void setTraceSupport(TraceSupport traceSupport) {
+        this.traceSupport = traceSupport;
+    }
+
     @Override
     @Transactional
     // ENTERPRISE ARCHITECTURE: Transactional Outbox Pattern
@@ -46,7 +53,7 @@ public class TelemetryProcessingServiceImpl implements TelemetryProcessingServic
     // and the outgoing messaging event (OutboxEvent) happen atomically. 
     // This perfectly resolves the distributed systems 'dual-write' problem—if the database commits, 
     // Debezium will read the WAL and Kafka will receive the event. If it fails, neither commits.
-    public Mono<Void> processPayloadAsync(TelemetryPayload payload) {
+    public Mono<Void> processPayloadAsync(TelemetryPayload payload, String correlationId) {
         log.info("[{}] Processing telemetry payload async for device: {}", Thread.currentThread().getName(), safe(payload.getDeviceId()));
         
         TelemetryEvent event = new TelemetryEvent(
@@ -55,6 +62,7 @@ public class TelemetryProcessingServiceImpl implements TelemetryProcessingServic
             payload.getLogLevel(),
             payload.getRawPayload()
         );
+        event.setCorrelationId(correlationId);
         
         return repository.save(event)
             .flatMap(savedEvent -> {
@@ -79,17 +87,21 @@ public class TelemetryProcessingServiceImpl implements TelemetryProcessingServic
                         outboxEvent.setAggregateId(savedEvent.getId().toString());
                         outboxEvent.setEventType(eventType);
                         outboxEvent.setPayload(payloadStr);
+                        outboxEvent.setCorrelationId(correlationId);
                         outboxEvent.setCreatedAt(Instant.now());
 
-                        Mono<OutboxEvent> saveOutbox = outboxRepository.save(outboxEvent);
-
-                        if (anomalyScore.isAnomaly()) {
-                            log.warn("[ANOMALY REACTION] Telemetry Z-Score outlier flagged for device: {}", safe(payload.getDeviceId()));
-                            return ledgerService.appendEvent("TELEMETRY_ANOMALY", payloadStr)
-                                    .then(saveOutbox);
-                        }
-
-                        return saveOutbox;
+                        return traceSupport.currentTraceparent().defaultIfEmpty("")
+                                .flatMap(traceparent -> {
+                                    outboxEvent.setTraceparent(traceparent.isEmpty() ? null : traceparent);
+                                    Mono<OutboxEvent> saveOutbox = outboxRepository.save(outboxEvent);
+                                    if (anomalyScore.isAnomaly()) {
+                                        log.warn("[ANOMALY REACTION] Telemetry Z-Score outlier flagged for device: {}", safe(payload.getDeviceId()));
+                                        return saveOutbox.flatMap(savedOutbox -> ledgerService.appendToLedger(
+                                                "TELEMETRY_ANOMALY", payloadStr, savedOutbox.getId(), correlationId)
+                                                .thenReturn(savedOutbox));
+                                    }
+                                    return saveOutbox;
+                                });
                     }).thenReturn(savedEvent);
             })
             .doOnError(e -> log.error("[{}] Error processing telemetry async: {}", Thread.currentThread().getName(), e.getMessage(), e))

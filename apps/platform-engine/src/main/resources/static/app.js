@@ -37,7 +37,7 @@ function renderRecentEvents(events) {
   if (!events.length) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
-    cell.colSpan = 5;
+    cell.colSpan = 8;
     cell.textContent = 'No outbox events yet.';
     row.append(cell);
     body.replaceChildren(row);
@@ -49,8 +49,10 @@ function renderRecentEvents(events) {
     const values = [
       event.eventType,
       event.aggregateType,
+      event.id,
+      event.correlationId || '—',
       event.createdAt ? new Date(event.createdAt).toLocaleString() : 'Unknown',
-      event.processed ? 'Published' : 'Pending',
+      event.processed ? 'Published' : event.lastAttemptFailed ? 'Retry pending' : 'Pending',
       String(event.retryCount)
     ];
     for (const value of values) {
@@ -59,9 +61,111 @@ function renderRecentEvents(events) {
       row.append(cell);
     }
     row.dataset.processed = String(event.processed);
+    const actionCell = document.createElement('td');
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'button small';
+    action.textContent = 'Open';
+    action.setAttribute('aria-label', `Open timeline for ${event.eventType}`);
+    action.addEventListener('click', () => loadTimeline({ eventId: event.id }));
+    actionCell.append(action);
+    row.append(actionCell);
     return row;
   });
   body.replaceChildren(...rows);
+}
+
+function timelineLink(traceId) {
+  const query = {
+    datasource: 'Tempo',
+    queries: [{ refId: 'A', queryType: 'traceql', query: `{ trace:id = "${traceId}" }` }],
+    range: { from: 'now-7d', to: 'now' }
+  };
+  return `http://${window.location.hostname}:3000/explore?left=${encodeURIComponent(JSON.stringify(query))}`;
+}
+
+function renderTimeline(timeline) {
+  const list = $('workflowTimeline');
+  const events = timeline.events || [];
+  if (!events.length) {
+    list.replaceChildren();
+    $('timelineStatus').textContent = `No workflow events found for ${timeline.lookupType} ${timeline.lookupKey}.`;
+    $('timelineStatus').dataset.state = 'empty';
+    return;
+  }
+
+  const items = [];
+  for (const event of events) {
+    const group = document.createElement('li');
+    group.className = 'workflow-event';
+    const heading = document.createElement('h4');
+    heading.textContent = `${event.eventType} · ${event.eventId}`;
+    group.append(heading);
+    const metadata = document.createElement('p');
+    metadata.textContent = `Correlation: ${event.correlationId || 'not recorded'} · Retries: ${event.retryCount}`;
+    group.append(metadata);
+    const steps = document.createElement('ol');
+    steps.className = 'workflow-steps';
+    for (const step of event.steps) {
+      const item = document.createElement('li');
+      item.dataset.state = step.status;
+      const title = document.createElement('strong');
+      title.textContent = step.name.replaceAll('-', ' ');
+      const detail = document.createElement('span');
+      detail.textContent = `${step.status}: ${step.detail || 'No additional detail'}`;
+      item.append(title, detail);
+      if (step.occurredAt) {
+        const time = document.createElement('time');
+        time.dateTime = step.occurredAt;
+        time.textContent = new Date(step.occurredAt).toLocaleString();
+        item.append(time);
+      }
+      steps.append(item);
+    }
+    group.append(steps);
+    if (event.traceId) {
+      const trace = document.createElement('a');
+      trace.href = timelineLink(event.traceId);
+      trace.target = '_blank';
+      trace.rel = 'noopener noreferrer';
+      trace.textContent = `Open trace ${event.traceId} in Grafana`;
+      group.append(trace);
+    }
+    items.push(group);
+  }
+  list.replaceChildren(...items);
+  $('timelineStatus').textContent = `Showing ${events.length} workflow event${events.length === 1 ? '' : 's'} for ${timeline.lookupType} ${timeline.lookupKey}.`;
+  const hasPendingStep = events.some((event) =>
+    event.steps.some((step) => ['pending', 'retrying', 'failed'].includes(step.status)));
+  $('timelineStatus').dataset.state = hasPendingStep ? 'pending' : 'loaded';
+}
+
+async function loadTimeline(lookup) {
+  const eventId = lookup?.eventId ?? $('timelineEventId').value.trim();
+  const correlationId = lookup?.correlationId ?? $('timelineCorrelationId').value.trim();
+  if (Boolean(eventId) === Boolean(correlationId)) {
+    $('timelineStatus').textContent = 'Provide exactly one event ID or correlation ID.';
+    $('timelineStatus').dataset.state = 'error';
+    $('workflowTimeline').replaceChildren();
+    return;
+  }
+  if (lookup?.eventId) {
+    $('timelineEventId').value = lookup.eventId;
+    $('timelineCorrelationId').value = '';
+  }
+  $('timelineStatus').textContent = 'Loading workflow evidence...';
+  $('timelineStatus').dataset.state = 'loading';
+  $('workflowTimeline').setAttribute('aria-busy', 'true');
+  $('workflowTimeline').replaceChildren();
+  try {
+    const key = eventId ? `eventId=${encodeURIComponent(eventId)}` : `correlationId=${encodeURIComponent(correlationId)}`;
+    renderTimeline(await request(`/api/v1/outbox/timeline?${key}`));
+  } catch (error) {
+    $('timelineStatus').textContent = `Unable to load workflow evidence: ${error.message}`;
+    $('timelineStatus').dataset.state = 'error';
+  } finally {
+    $('workflowTimeline').setAttribute('aria-busy', 'false');
+  }
 }
 
 async function refreshHealth() {
@@ -76,25 +180,41 @@ async function refreshHealth() {
 }
 
 async function refreshEvidence() {
+  $('outboxResult').textContent = 'Loading outbox status...';
+  $('hashResult').textContent = 'Loading ledger head...';
+  $('ledgerResult').textContent = 'Loading ledger verification...';
+  $('timelineStatus').textContent = 'Loading recent evidence...';
+  $('timelineStatus').dataset.state = 'loading';
+  $('workflowTimeline').replaceChildren();
   try {
-    const [outbox, hash, ledger, recentEvents] = await Promise.all([
+    const [outbox, hash, verification, recentEvents] = await Promise.all([
       request('/api/v1/outbox/status'),
       request('/api/v1/ledger/latest-hash'),
-      request('/api/v1/ledger'),
+      request('/api/v1/ledger/verify?recent=100'),
       request('/api/v1/outbox/recent')
     ]);
     show('outboxResult', outbox);
     show('hashResult', hash);
-    show('ledgerResult', ledger);
+    show('ledgerResult', {
+      valid: verification.valid,
+      eventsChecked: verification.eventsChecked,
+      scope: verification.scope
+    });
     renderRecentEvents(recentEvents);
+    $('timelineStatus').textContent = recentEvents.length
+      ? 'Choose a recent event or enter an event ID or correlation ID.'
+      : 'No workflow events yet.';
+    $('timelineStatus').dataset.state = recentEvents.length ? 'loaded' : 'empty';
   } catch (error) {
     show('outboxResult', `Unable to load evidence: ${error.message}`);
     const row = document.createElement('tr');
     const cell = document.createElement('td');
-    cell.colSpan = 5;
+    cell.colSpan = 8;
     cell.textContent = `Unable to load recent events: ${error.message}`;
     row.append(cell);
     $('recentEventsBody').replaceChildren(row);
+    $('timelineStatus').textContent = `Unable to load evidence: ${error.message}`;
+    $('timelineStatus').dataset.state = 'error';
   }
 }
 
@@ -176,5 +296,6 @@ $('sendBaseline').addEventListener('click', async () => {
 $('sendOutlier').addEventListener('click', () => sendTelemetry(99));
 
 $('refreshEvidence').addEventListener('click', refreshEvidence);
+$('loadTimeline').addEventListener('click', () => loadTimeline());
 refreshHealth();
 refreshEvidence();

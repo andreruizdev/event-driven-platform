@@ -28,6 +28,9 @@ public class TelemetryEvent {
     @Column("raw_payload")
     private String rawPayload;
 
+    @Column("correlation_id")
+    private String correlationId;
+
     @Column("created_at")
     private OffsetDateTime createdAt = OffsetDateTime.now();
 

@@ -14,6 +14,7 @@ import java.time.Instant;
 public interface OutboxEventRepository extends ReactiveCrudRepository<OutboxEvent, UUID> {
     Flux<OutboxEvent> findByProcessedFalse();
     Flux<OutboxEvent> findTop20ByOrderByCreatedAtDesc();
+    Flux<OutboxEvent> findTop20ByCorrelationIdOrderByCreatedAtDesc(String correlationId);
     Mono<OutboxEvent> findFirstByAggregateTypeAndAggregateIdOrderByCreatedAtDesc(String aggregateType, String aggregateId);
     Mono<OutboxEvent> findFirstByEventTypeAndAggregateTypeOrderByCreatedAtDesc(String eventType, String aggregateType);
 

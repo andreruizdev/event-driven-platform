@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
+import org.springframework.http.HttpStatus;
 import reactor.core.publisher.Mono;
 
 import java.util.UUID;
@@ -21,16 +22,24 @@ public class CorrelationIdWebFilter implements WebFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String correlationId = exchange.getRequest().getHeaders().getFirst(CORRELATION_ID_HEADER);
+        if (correlationId != null && correlationId.length() > 255) {
+            exchange.getResponse().setStatusCode(HttpStatus.BAD_REQUEST);
+            return exchange.getResponse().setComplete();
+        }
         if (correlationId == null || correlationId.isBlank()) {
             correlationId = UUID.randomUUID().toString();
         }
+        String resolvedCorrelationId = correlationId;
 
         String traceId = Span.current().getSpanContext().getTraceId();
-        exchange.getResponse().getHeaders().set(CORRELATION_ID_HEADER, correlationId);
+        exchange.getResponse().getHeaders().set(CORRELATION_ID_HEADER, resolvedCorrelationId);
         if (traceId != null && !traceId.isBlank() && !traceId.equals("00000000000000000000000000000000")) {
             exchange.getResponse().getHeaders().set(TRACE_ID_HEADER, traceId);
         }
 
-        return chain.filter(exchange);
+        ServerWebExchange correlatedExchange = exchange.mutate()
+                .request(request -> request.headers(headers -> headers.set(CORRELATION_ID_HEADER, resolvedCorrelationId)))
+                .build();
+        return chain.filter(correlatedExchange);
     }
 }

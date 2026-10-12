@@ -20,8 +20,10 @@ public class TelemetryController {
     }
 
     @PostMapping("/telemetry")
-    public Mono<ResponseEntity<Void>> receiveTelemetry(@RequestBody TelemetryPayload payload) {
-        return processingService.processPayloadAsync(payload)
+    public Mono<ResponseEntity<Void>> receiveTelemetry(
+            @RequestBody TelemetryPayload payload,
+            @RequestHeader(value = "X-Correlation-Id", required = false) String correlationId) {
+        return processingService.processPayloadAsync(payload, correlationId)
                 .thenReturn(ResponseEntity.status(HttpStatus.ACCEPTED).<Void>build())
                 .onErrorResume(e -> Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).<Void>build()));
     }

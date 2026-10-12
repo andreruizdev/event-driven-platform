@@ -138,17 +138,20 @@ public class E2EOutboxIntegrationTest {
 
         String password = System.getenv().getOrDefault("SPRING_SECURITY_USER_PASSWORD", "local-dev-password");
 
-        LoanApplication submittedApplication = webTestClient.post()
+        var response = webTestClient.post()
                 .uri("/api/v1/loans")
                 .headers(headers -> headers.setBasicAuth("admin", password))
                 .bodyValue(request)
                 .exchange()
             .expectStatus().isOk()
             .expectBody(LoanApplication.class)
-            .returnResult()
-            .getResponseBody();
+            .returnResult();
+        LoanApplication submittedApplication = response.getResponseBody();
 
         Assertions.assertNotNull(submittedApplication);
+        String correlationId = response.getResponseHeaders().getFirst("X-Correlation-Id");
+        Assertions.assertNotNull(correlationId);
+        Assertions.assertEquals(correlationId, submittedApplication.getCorrelationId());
         Assertions.assertNotNull(loanApplicationRepository.findById(submittedApplication.getId())
             .block(Duration.ofSeconds(5)));
 
@@ -157,6 +160,7 @@ public class E2EOutboxIntegrationTest {
             .block(Duration.ofSeconds(5));
         Assertions.assertNotNull(outboxEvent);
         Assertions.assertEquals("ApplicationSubmitted", outboxEvent.getEventType());
+        Assertions.assertEquals(correlationId, outboxEvent.getCorrelationId());
 
         ConsumerRecord<String, String> publishedRecord = consumeKafkaRecord(
             "eventdrivenmicroservices-outbox-events", outboxEvent.getId());
@@ -173,6 +177,8 @@ public class E2EOutboxIntegrationTest {
             .block(Duration.ofSeconds(5));
         Assertions.assertNotNull(ledgerEvent);
         Assertions.assertEquals(submittedApplication.getId().toString(), envelope.aggregateId());
+        Assertions.assertEquals(outboxEvent.getId(), ledgerEvent.getOutboxEventId());
+        Assertions.assertEquals(correlationId, ledgerEvent.getCorrelationId());
         Assertions.assertEquals(64, ledgerEvent.getCurrentHash().length());
 
         System.out.println("[E2E] Loan -> PostgreSQL/outbox -> Kafka -> ledger verified.");
@@ -198,6 +204,13 @@ public class E2EOutboxIntegrationTest {
             page.waitForFunction("id => document.querySelector('#loanResult').textContent.includes(id)", applicantId);
             page.locator("#recentEventsBody").getByText("ApplicationSubmitted")
                     .waitFor(new com.microsoft.playwright.Locator.WaitForOptions().setTimeout(30_000));
+            page.locator("#recentEventsBody tr").filter(new com.microsoft.playwright.Locator.FilterOptions()
+                            .setHasText("ApplicationSubmitted"))
+                    .locator("button")
+                    .click();
+            page.locator("#workflowTimeline .workflow-steps li").first().waitFor();
+            Assertions.assertTrue(page.locator("#workflowTimeline").textContent().contains("accepted"));
+            Assertions.assertFalse(page.locator("#workflowTimeline").textContent().contains(applicantId));
 
             page.locator("#merchantId").fill("browser-test-" + UUID.randomUUID());
             page.locator("#sendBurst").click();
@@ -236,6 +249,7 @@ public class E2EOutboxIntegrationTest {
             .block(Duration.ofSeconds(5));
         Assertions.assertNotNull(anomalyEvent);
         Assertions.assertTrue(anomalyEvent.getPayload().contains(transactionId));
+        Assertions.assertEquals(transactionId, anomalyEvent.getCorrelationId());
         // The test context does not adopt inbound headers; live adoption is asserted by scripts/cdc-drill.sh.
         String propagatedTrace = anomalyEvent.getTraceparent();
         Assertions.assertTrue(propagatedTrace != null && propagatedTrace.matches("00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]"),

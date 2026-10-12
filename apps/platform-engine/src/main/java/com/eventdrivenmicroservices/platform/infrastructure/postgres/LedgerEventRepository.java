@@ -13,6 +13,8 @@ import java.util.UUID;
 public interface LedgerEventRepository extends ReactiveCrudRepository<LedgerEvent, UUID> {
 
     Flux<LedgerEvent> findAllByOrderByCreatedAtDesc();
+
+    Mono<LedgerEvent> findFirstByOutboxEventId(UUID outboxEventId);
     
     @Query("SELECT current_hash FROM ledger_events ORDER BY seq DESC LIMIT 1")
     Mono<String> findLatestHash();

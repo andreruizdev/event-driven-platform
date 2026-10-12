@@ -24,6 +24,9 @@ public class OutboxEvent {
     
     private String traceparent;
 
+    @Column("correlation_id")
+    private String correlationId;
+
     @Column("processed")
     private boolean processed = false;
 

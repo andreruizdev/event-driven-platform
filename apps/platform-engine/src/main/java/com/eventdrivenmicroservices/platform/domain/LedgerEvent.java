@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
+import org.springframework.data.relational.core.mapping.Column;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -20,6 +21,10 @@ public class LedgerEvent {
     private UUID id;
     private String transactionType;
     private String payload;
+    @Column("outbox_event_id")
+    private UUID outboxEventId;
+    @Column("correlation_id")
+    private String correlationId;
     private String currentHash;
     private String previousHash;
     private OffsetDateTime createdAt;

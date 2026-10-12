@@ -12,6 +12,8 @@ import java.util.UUID;
 public interface AnomalyAlertOutboxRepository
         extends ReactiveCrudRepository<AnomalyAlertOutboxEvent, UUID> {
 
+    Mono<AnomalyAlertOutboxEvent> findByEventId(UUID eventId);
+
     @Modifying
     @Query("""
             INSERT INTO anomaly_alert_outbox (event_id, aggregate_id, envelope, traceparent, created_at)

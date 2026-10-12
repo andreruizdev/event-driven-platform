@@ -256,6 +256,48 @@ data:
           "targets": [
             { "expr": "histogram_quantile(0.95, sum(rate(eventdrivenmicroservices_outbox_publish_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95 seconds" }
           ]
+        },
+        {
+          "type": "stat",
+          "title": "Debezium connector and task state",
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 28},
+          "targets": [
+            { "expr": "eventdrivenmicroservices_connector_running", "legendFormat": "Connector running" },
+            { "expr": "eventdrivenmicroservices_connector_tasks_running", "legendFormat": "Running tasks" }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "Debezium failed tasks",
+          "gridPos": {"h": 6, "w": 8, "x": 8, "y": 28},
+          "targets": [
+            { "expr": "eventdrivenmicroservices_connector_tasks_failed", "legendFormat": "Failed tasks" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Kafka consumer lag (records)",
+          "gridPos": {"h": 6, "w": 8, "x": 16, "y": 28},
+          "targets": [
+            { "expr": "max(kafka_consumer_fetch_manager_records_lag_max)", "legendFormat": "Max records behind" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Logical replication slot retained WAL",
+          "gridPos": {"h": 6, "w": 12, "x": 0, "y": 34},
+          "targets": [
+            { "expr": "eventdrivenmicroservices_replication_slot_retained_bytes", "legendFormat": "Retained bytes" }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Replication slot health",
+          "gridPos": {"h": 6, "w": 12, "x": 12, "y": 34},
+          "targets": [
+            { "expr": "eventdrivenmicroservices_replication_slot_inactive", "legendFormat": "Inactive slots" },
+            { "expr": "eventdrivenmicroservices_replication_slot_count", "legendFormat": "Total slots" }
+          ]
         }
       ]
     }
