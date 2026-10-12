@@ -10,4 +10,4 @@ When invoked, perform the following actions:
 1. **Verify Outbox Persistence**: Check that `LoanService` writes outbox events inside `@Transactional` R2DBC database blocks.
 2. **Measure Delivery Latency**: Verify that `OutboxProcessorService` polls and publishes events to Kafka topic `eventdrivenmicroservices-outbox-events`.
 3. **Verify Debezium CDC**: Ensure Debezium PostgreSQL connector streams WAL changes for `public.outbox_events`.
-4. **Assert SLA**: Flag any delivery latency exceeding 500 ms.
+4. **Assert SLA**: Flag any delivery latency exceeding 500 ms. `scripts/cdc-drill.sh` measures `processed_at - created_at` over sequential samples and gates p95 at 500 ms (CDC default publisher; the 5 s poller cannot meet this).

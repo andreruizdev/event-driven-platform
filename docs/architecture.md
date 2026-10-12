@@ -70,7 +70,7 @@ Every HTTP response includes an `X-Correlation-Id` header (generated or preserve
 
 To provide at-least-once delivery without distributed two-phase commit:
 1. **Atomic Dual-Write:** The business entity and the corresponding outbox record are committed together in a single PostgreSQL R2DBC transaction.
-2. **Selectable Publisher:** `OUTBOX_PUBLISHER_MODE` is `poller` by default. In poller mode, a background publisher queries pending events in batches of up to 50, claims leases, publishes sequentially, and isolates per-event failures with capped exponential retry delay. In opt-in `cdc` mode, PostgreSQL logical replication feeds Debezium's insert-only shadow topic; the CDC bridge maps the row to the same envelope and canonical topic, waits for Kafka acknowledgement, then sets `processed` to mean published (not consumer-processed). The two publishers are mutually exclusive.
+2. **Selectable Publisher:** `OUTBOX_PUBLISHER_MODE` is `cdc` by default. In opt-in `poller` mode, a background publisher queries pending events in batches of up to 50, claims leases, publishes sequentially, and isolates per-event failures with capped exponential retry delay. In the default `cdc` mode, PostgreSQL logical replication feeds Debezium's insert-only shadow topic; the CDC bridge maps the row to the same envelope and canonical topic, waits for Kafka acknowledgement, then sets `processed` to mean published (not consumer-processed). The two publishers are mutually exclusive.
 3. **Kafka Header Injection:** When present, the stored W3C `traceparent` is injected into the Kafka record header. This is partial propagation, not a verified end-to-end trace.
 4. **Contract Envelope:** Payloads are serialized using the current `EventEnvelope` schema (`eventVersion`):
    ```json

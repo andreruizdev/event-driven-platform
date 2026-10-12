@@ -101,7 +101,7 @@ echo "OK: ${fourth_count} canonical message(s) for ${fourth} after bridge crash 
 
 # Latency: sequential single-event inserts; latency is processed_at - created_at on the same host clock.
 LATENCY_SAMPLES="${CDC_LATENCY_SAMPLES:-20}"
-LATENCY_P95_BUDGET_MS="${CDC_LATENCY_P95_BUDGET_MS:-1000}"
+LATENCY_P95_BUDGET_MS="${CDC_LATENCY_P95_BUDGET_MS:-500}"
 latency_ids=()
 for _ in $(seq 1 "$LATENCY_SAMPLES"); do
   id="$(cat /proc/sys/kernel/random/uuid)"

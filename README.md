@@ -20,7 +20,7 @@ flowchart TD
 
     subgraph Atomic R2DBC Persistence & Ledger
         OutboxSave -->|Single Tx| DB[(PostgreSQL)]
-      DB -->|outbox_events| Poller[Outbox Publisher<br/>poller default, Debezium CDC opt-in]
+      DB -->|outbox_events| Poller[Outbox Publisher<br/>Debezium CDC default, poller fallback]
         DB -->|ledger_events| Ledger[(SHA-256 Ledger<br/>Type: ANOMALY_FLAGGED)]
     end
 
@@ -43,7 +43,7 @@ flowchart TD
    - Non-blocking reactive HTTP ingestion API.
    - **Streaming Anomaly Detection Engine**: In-memory sliding window calculating transaction velocity bursts and telemetry Z-Score metric outliers.
    - **Transactional Outbox Pattern**: Persists domain entities (`loan_applications`, `telemetry_events`, `financial_transactions`) alongside `outbox_events` and trigger-protected, hash-chained `ledger_events` (verify via `GET /api/v1/ledger/verify`) using PostgreSQL R2DBC.
-   - **Outbox Publisher**: `OUTBOX_PUBLISHER_MODE=poller` (default) runs a leased, retrying scheduled relay; `cdc` runs the Debezium bridge instead. The two are mutually exclusive.
+   - **Outbox Publisher**: `OUTBOX_PUBLISHER_MODE=cdc` (default) runs the Debezium bridge: PostgreSQL WAL, Debezium, shadow topic, bridge, canonical topic. `poller` runs a leased, retrying scheduled relay (5 s cadence) and remains as a fallback for environments without Debezium. The two are mutually exclusive.
    - **Kafka Listener**: Validates the version-1 envelope, routes anomaly event types, durably records an alert intent in `anomaly_alert_outbox` (idempotent on redelivery), and sends malformed records to the `.DLT` topic. A relay publishes intents to `eventdrivenmicroservices-anomaly-alerts` with backoff.
 
 2. **`deploy/helm`**:
@@ -60,7 +60,7 @@ flowchart TD
 - **Transactional Outbox Pattern**: Enforces dual-write consistency by persisting business state and event records in a single database transaction prior to asynchronous Kafka publishing.
 - **Reactive Non-Blocking Core**: Built on Spring WebFlux, Project Reactor, and R2DBC to maximize vertical I/O throughput without thread-per-request bottlenecks.
 - **Cryptographic Ledger**: SHA-256 hash-chained `ledger_events` table, serialized by an advisory lock, immutable via database triggers, with an on-demand verification endpoint.
-- **Debezium (opt-in)**: Helm deploys Connect and a registration Job. CDC-to-envelope delivery and a connector restart, Connect pod loss, and platform-pod loss were verified in Kind (CI `cdc-drill`); the default publisher remains the scheduled relay.
+- **Debezium CDC (default publisher)**: Helm deploys Connect and a registration Job (`poll.interval.ms=50`). CI `cdc-drill` verifies delivery, connector restart, Connect pod loss, platform-pod loss, end-to-end latency (p50 69 ms, p95 105 ms over 20 samples, run 38189122766) and the monitoring signals.
 - **Distributed Tracing & Monitoring**: OpenTelemetry (OTLP) metrics and trace exemplars routed to Prometheus and Grafana Tempo via the OTel Collector.
 - **Kubernetes Deployment Hardening**: Security contexts (non-root, read-only filesystem), init containers for dependency readiness, and HPA autoscaling.
 
@@ -116,7 +116,7 @@ Run the single entry-point script to validate the toolchain, run Gradle tests, p
 
 ## Current Limitations
 
-- The project is a modular monolith. The scheduled outbox relay is the default publisher; Debezium CDC is opt-in. Connector restart, Connect pod loss, and platform-pod loss are CI-verified (`cdc-drill`); the exact crash window between canonical publish and the `processed` update is covered only by mocked tests.
+- The project is a modular monolith. Debezium CDC is the default publisher (the 5 s poller remains an opt-in fallback). CDC latency is measured in CI at roughly 100 ms p95 on a Kind cluster, not the sub-5 ms sometimes quoted for CDC; the drill gates p95 at 500 ms. The exact crash window between canonical publish and the `processed` update is covered only by mocked tests.
 - Delivery is at-least-once with idempotent consumer effects, not exactly-once.
 - Bearer tokens are validated for HS256 signature, `exp`, `nbf`, and optional issuer/audience (`JWT_ISSUER`, `JWT_AUDIENCE`) and grant no authorities. There is no key rotation (`kid`), no token issuer. HTTP-level behavior is covered by `BearerAuthenticationHttpTest`.
 - The ledger is hash-chained, serialized with an advisory lock, protected by database triggers that reject UPDATE/DELETE/TRUNCATE, and checkable via `GET /api/v1/ledger/verify`. Verification reads the whole table (no pagination or checkpoints), and a database superuser can still disable the triggers.
