@@ -2,6 +2,7 @@
   "name": "EventDrivenMicroservices Dev",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
   "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "version": "latest",
       "enableNonRootDocker": "true",
@@ -20,14 +21,16 @@
       "version": "latest"
     }
   },
-  "postCreateCommand": "command -v kind >/dev/null 2>&1 || (curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64 && chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind)",
+  "postCreateCommand": "sudo apt-get update -qq && sudo apt-get install -y -qq jq openssl && (command -v kind >/dev/null 2>&1 || (curl -fsSLo ./kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64 && chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind))",
   "customizations": {
     "vscode": {
       "extensions": [
         "vscjava.vscode-java-pack",
         "ms-azuretools.vscode-docker",
         "ms-kubernetes-tools.vscode-kubernetes-tools",
-        "hashicorp.terraform"
+        "hashicorp.terraform",
+        "redhat.vscode-yaml",
+        "github.vscode-pull-request-github"
       ]
     }
   },

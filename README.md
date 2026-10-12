@@ -71,7 +71,7 @@ flowchart TD
 ### Prerequisites
 - Java 21 & Gradle 8.4
 - Helm 3+ & kubectl
-- Kind & OpenTofu/Terraform
+- Kind & OpenTofu/Terraform (>= 1.6; `tehcyx/kind` provider ~> 0.11, lock file committed)
 - Docker or Podman (for local cluster execution)
 
 ### Centralized Build & Boot Script

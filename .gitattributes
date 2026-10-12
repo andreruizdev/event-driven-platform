@@ -1,2 +1,14 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Scripts and manifests must stay LF so they run inside Linux containers and Kind nodes
+*.sh text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.tf text eol=lf
+*.hcl text eol=lf
+Dockerfile text eol=lf
+gradlew text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.jar binary

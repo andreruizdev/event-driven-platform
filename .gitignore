@@ -31,8 +31,8 @@ desktop.ini
 **/.terraform/
 *.tfstate
 *.tfstate.*
-.terraform.lock.hcl
 *-cluster-config
+.terraform.tfstate.lock.info
 
 # 3. Build Artifacts (General & Java/Node)
 **/build/
