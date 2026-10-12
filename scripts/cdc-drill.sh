@@ -106,6 +106,15 @@ kubectl rollout status -n "$NS" deploy/eventdrivenmicroservices-debezium --timeo
 wait_for "connector RUNNING after Connect pod loss" connector_running
 wait_for "third row (written during Connect outage) marked processed" is_processed "$third"
 
+for id in "$first" "$second" "$third"; do
+  count="$(canonical_count "$id")"
+  if [ "$count" != "1" ]; then
+    echo "FAIL: expected exactly one canonical message for ${id}, found ${count}" >&2
+    exit 1
+  fi
+  echo "OK: exactly one canonical message for ${id}"
+done
+
 # The single-broker lab has no persistent Kafka volume, so this drill destroys broker-local
 # topics and offsets. Run it only in a disposable cluster with explicit operator opt-in.
 kafka_outage=""
@@ -158,15 +167,6 @@ insert_event "$fourth"
 kubectl delete pod -n "$NS" -l app=platform-engine --wait=false >/dev/null
 kubectl rollout status -n "$NS" deploy/platform-engine --timeout="${TIMEOUT}s"
 wait_for "fourth row marked processed after bridge pod loss" is_processed "$fourth"
-
-for id in "$first" "$second" "$third"; do
-  count="$(canonical_count "$id")"
-  if [ "$count" != "1" ]; then
-    echo "FAIL: expected exactly one canonical message for ${id}, found ${count}" >&2
-    exit 1
-  fi
-  echo "OK: exactly one canonical message for ${id}"
-done
 
 fourth_count="$(canonical_count "$fourth")"
 if [ "$fourth_count" -lt 1 ]; then
