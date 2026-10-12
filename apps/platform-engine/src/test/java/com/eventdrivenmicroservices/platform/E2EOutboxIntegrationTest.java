@@ -22,14 +22,17 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.KafkaContainer;
@@ -45,7 +48,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.UUID;
 import java.util.function.Supplier;
 import reactor.core.publisher.Mono;
@@ -53,6 +59,7 @@ import reactor.test.StepVerifier;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers(disabledWithoutDocker = true)
+@Import(E2EOutboxIntegrationTest.FaultInjectingTraceConfiguration.class)
 public class E2EOutboxIntegrationTest {
 
     private static final String TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
@@ -117,6 +124,9 @@ public class E2EOutboxIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private FaultInjectingTraceSupport faultInjectingTraceSupport;
 
     @Test
     void loanSubmissionPersistsPublishesAndAppendsLedgerEvent() throws Exception {
@@ -326,6 +336,44 @@ public class E2EOutboxIntegrationTest {
         }
     }
 
+    @Test
+    void consumerRedeliversAfterIntentCommitBeforeOffsetCommit() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        EventEnvelope envelope = new EventEnvelope(
+                eventId,
+                "ANOMALY_VELOCITY_SPIKE",
+                1,
+                "FinancialTransaction",
+                "consumer-replay-" + eventId,
+                TRACEPARENT,
+                Instant.now(),
+                "{}");
+        ProducerRecord<String, String> input = new ProducerRecord<>(
+                "eventdrivenmicroservices-outbox-events",
+                envelope.aggregateId(),
+                objectMapper.writeValueAsString(envelope));
+        input.headers().add("traceparent", TRACEPARENT.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        faultInjectingTraceSupport.armFailureAfterIntentCommit();
+
+        try {
+            var metadata = kafkaTemplate.send(input).get(30, TimeUnit.SECONDS).getRecordMetadata();
+            TopicPartition partition = new TopicPartition(metadata.topic(), metadata.partition());
+            Assertions.assertTrue(faultInjectingTraceSupport.awaitIntentCommit(Duration.ofSeconds(15)),
+                    "listener must reach the injected failure after persisting its alert intent");
+            Assertions.assertEquals(1, countAlertIntents(eventId));
+            assertOffsetNotCommittedPast(partition, metadata.offset());
+
+            faultInjectingTraceSupport.allowListenerFailure();
+            awaitConsumerCommit(partition, metadata.offset());
+            Assertions.assertEquals(1, faultInjectingTraceSupport.injectedFailureCount());
+            Assertions.assertEquals(1, countAlertIntents(eventId),
+                    "redelivery after durable intent creation must not create a duplicate intent");
+        } finally {
+            faultInjectingTraceSupport.allowListenerFailure();
+            faultInjectingTraceSupport.disarm();
+        }
+    }
+
     private void installProcessedFailureTrigger(UUID eventId) {
         databaseClient.sql("""
                         CREATE OR REPLACE FUNCTION e2e_fail_processed_mark() RETURNS trigger
@@ -500,6 +548,19 @@ public class E2EOutboxIntegrationTest {
         }
     }
 
+    private void assertOffsetNotCommittedPast(TopicPartition topicPartition, long recordOffset) throws Exception {
+        Properties properties = new Properties();
+        properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
+        try (AdminClient adminClient = AdminClient.create(properties)) {
+            var offsets = adminClient.listConsumerGroupOffsets("eventdrivenmicroservices-anomaly-cep-group")
+                    .partitionsToOffsetAndMetadata()
+                    .get(5, TimeUnit.SECONDS);
+            var committed = offsets.get(topicPartition);
+            Assertions.assertTrue(committed == null || committed.offset() <= recordOffset,
+                    () -> "consumer offset advanced past unacknowledged record " + recordOffset + ": " + committed);
+        }
+    }
+
     private String traceparent(ConsumerRecord<String, String> record) {
         Header header = record.headers().lastHeader("traceparent");
         return header == null ? null : new String(header.value(), java.nio.charset.StandardCharsets.UTF_8);
@@ -534,5 +595,70 @@ public class E2EOutboxIntegrationTest {
                 .block(Duration.ofSeconds(5));
         Assertions.assertNotNull(count);
         return count;
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class FaultInjectingTraceConfiguration {
+        @Bean
+        @Primary
+        FaultInjectingTraceSupport faultInjectingTraceSupport(
+                io.micrometer.tracing.Tracer tracer,
+                io.opentelemetry.api.trace.Tracer otelTracer) {
+            return new FaultInjectingTraceSupport(tracer, otelTracer);
+        }
+    }
+
+    static class FaultInjectingTraceSupport
+            extends com.eventdrivenmicroservices.platform.infrastructure.observability.TraceSupport {
+        private final AtomicBoolean failAfterIntentCommit = new AtomicBoolean();
+        private final AtomicInteger injectedFailures = new AtomicInteger();
+        private volatile CountDownLatch intentCommitted = new CountDownLatch(0);
+        private volatile CountDownLatch allowFailure = new CountDownLatch(0);
+
+        FaultInjectingTraceSupport(io.micrometer.tracing.Tracer tracer,
+                                   io.opentelemetry.api.trace.Tracer otelTracer) {
+            super(tracer, otelTracer);
+        }
+
+        void armFailureAfterIntentCommit() {
+            intentCommitted = new CountDownLatch(1);
+            allowFailure = new CountDownLatch(1);
+            injectedFailures.set(0);
+            failAfterIntentCommit.set(true);
+        }
+
+        boolean awaitIntentCommit(Duration timeout) throws InterruptedException {
+            return intentCommitted.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        }
+
+        void allowListenerFailure() {
+            allowFailure.countDown();
+        }
+
+        int injectedFailureCount() {
+            return injectedFailures.get();
+        }
+
+        void disarm() {
+            failAfterIntentCommit.set(false);
+        }
+
+        @Override
+        public void runInSpan(String name, String traceparent, String tagKey, String tagValue,
+                              ThrowingRunnable work) throws Exception {
+            super.runInSpan(name, traceparent, tagKey, tagValue, () -> {
+                work.run();
+                if (failAfterIntentCommit.get() && "ANOMALY_VELOCITY_SPIKE".equals(tagValue)) {
+                    intentCommitted.countDown();
+                    if (!allowFailure.await(15, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out awaiting consumer crash-window test release");
+                    }
+                    if (failAfterIntentCommit.compareAndSet(true, false)) {
+                        injectedFailures.incrementAndGet();
+                        throw new IllegalStateException("Injected consumer failure after alert intent commit");
+                    }
+                }
+            });
+        }
     }
 }
