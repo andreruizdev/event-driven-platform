@@ -87,6 +87,9 @@ public class E2EOutboxIntegrationTest {
         registry.add("spring.flyway.user", () -> envOrDefault("SPRING_FLYWAY_USER", postgres::getUsername));
         registry.add("spring.flyway.password", () -> envOrDefault("SPRING_FLYWAY_PASSWORD", postgres::getPassword));
         registry.add("app.outbox.publisher.mode", () -> "poller");
+        registry.add("spring.kafka.producer.properties.max.block.ms", () -> "5000");
+        registry.add("spring.kafka.producer.properties.request.timeout.ms", () -> "4000");
+        registry.add("spring.kafka.producer.properties.delivery.timeout.ms", () -> "8000");
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         registry.add("spring.data.redis.host", () -> envOrDefault("SPRING_DATA_REDIS_HOST", redis::getHost));
         registry.add("spring.data.redis.port", () -> envOrDefault("SPRING_DATA_REDIS_PORT",
@@ -386,6 +389,50 @@ public class E2EOutboxIntegrationTest {
             faultInjectingTraceSupport.allowListenerFailure();
             faultInjectingTraceSupport.disarm();
         }
+    }
+
+    @Test
+    void alertRelayRetriesDuringKafkaOutageAndPublishesAfterRecovery() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        EventEnvelope envelope = new EventEnvelope(eventId, "ANOMALY_VELOCITY_SPIKE", 1,
+                "FinancialTransaction", "alert-outage-" + eventId, TRACEPARENT, Instant.now(), "{}");
+        String body = objectMapper.writeValueAsString(envelope);
+        var dockerClient = kafka.getDockerClient();
+        boolean paused = false;
+        try {
+            dockerClient.pauseContainerCmd(kafka.getContainerId()).exec();
+            paused = true;
+            Assertions.assertEquals(1, anomalyAlertOutboxRepository.insertIfAbsent(
+                    eventId, envelope.aggregateId(), body, TRACEPARENT, Instant.now()).block(Duration.ofSeconds(5)));
+
+            awaitAlertRelayState(eventId, "retry_count >= 1 AND last_error IS NOT NULL AND published_at IS NULL", 60);
+
+            dockerClient.unpauseContainerCmd(kafka.getContainerId()).exec();
+            paused = false;
+            awaitAlertRelayState(eventId, "published_at IS NOT NULL AND last_error IS NULL", 60);
+            Assertions.assertTrue(consumeKafkaRecords("eventdrivenmicroservices-anomaly-alerts", eventId, 1).size() >= 1);
+        } finally {
+            if (paused) {
+                dockerClient.unpauseContainerCmd(kafka.getContainerId()).exec();
+            }
+        }
+    }
+
+    private void awaitAlertRelayState(UUID eventId, String condition, int timeoutSeconds) throws Exception {
+        Instant deadline = Instant.now().plusSeconds(timeoutSeconds);
+        while (Instant.now().isBefore(deadline)) {
+            Long matches = databaseClient.sql("SELECT COUNT(*) AS n FROM anomaly_alert_outbox WHERE event_id = :id AND "
+                            + condition)
+                    .bind("id", eventId)
+                    .map((row, metadata) -> row.get("n", Long.class))
+                    .one()
+                    .block(Duration.ofSeconds(5));
+            if (matches != null && matches == 1) {
+                return;
+            }
+            java.util.concurrent.locks.LockSupport.parkNanos(Duration.ofMillis(500).toNanos());
+        }
+        throw new AssertionError("Alert intent " + eventId + " never reached state: " + condition);
     }
 
     private void installProcessedFailureTrigger(UUID eventId) {
