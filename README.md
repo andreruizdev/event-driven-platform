@@ -60,7 +60,7 @@ flowchart TD
 - **Transactional Outbox Pattern**: Enforces dual-write consistency by persisting business state and event records in a single database transaction prior to asynchronous Kafka publishing.
 - **Reactive Non-Blocking Core**: Built on Spring WebFlux, Project Reactor, and R2DBC to maximize vertical I/O throughput without thread-per-request bottlenecks.
 - **Cryptographic Ledger**: SHA-256 hash-chained `ledger_events` table, serialized by an advisory lock, immutable via database triggers, with an on-demand verification endpoint.
-- **Debezium (opt-in)**: Helm deploys Connect and a registration Job. CDC-to-envelope delivery and a connector restart were verified in Kind (CI `cdc-drill`); the default publisher remains the scheduled relay until Connect pod loss and bridge-crash replay are also proven (see the engineering guide).
+- **Debezium (opt-in)**: Helm deploys Connect and a registration Job. CDC-to-envelope delivery and a connector restart, Connect pod loss, and platform-pod loss were verified in Kind (CI `cdc-drill`); the default publisher remains the scheduled relay.
 - **Distributed Tracing & Monitoring**: OpenTelemetry (OTLP) metrics and trace exemplars routed to Prometheus and Grafana Tempo via the OTel Collector.
 - **Kubernetes Deployment Hardening**: Security contexts (non-root, read-only filesystem), init containers for dependency readiness, and HPA autoscaling.
 
@@ -116,9 +116,9 @@ Run the single entry-point script to validate the toolchain, run Gradle tests, p
 
 ## Current Limitations
 
-- The project is a modular monolith. The scheduled outbox relay is the default publisher; Debezium CDC is opt-in. Connector restart is CI-verified; Connect pod loss and bridge-crash replay are not yet proven.
+- The project is a modular monolith. The scheduled outbox relay is the default publisher; Debezium CDC is opt-in. Connector restart, Connect pod loss, and platform-pod loss are CI-verified (`cdc-drill`); the exact crash window between canonical publish and the `processed` update is covered only by mocked tests.
 - Delivery is at-least-once with idempotent consumer effects, not exactly-once.
-- Bearer tokens are validated for HS256 signature, `exp`, `nbf`, and optional issuer/audience (`JWT_ISSUER`, `JWT_AUDIENCE`) and grant no authorities. There is no key rotation (`kid`), no token issuer, and no HTTP-level bearer filter test yet.
+- Bearer tokens are validated for HS256 signature, `exp`, `nbf`, and optional issuer/audience (`JWT_ISSUER`, `JWT_AUDIENCE`) and grant no authorities. There is no key rotation (`kid`), no token issuer. HTTP-level behavior is covered by `BearerAuthenticationHttpTest`.
 - The ledger is hash-chained, serialized with an advisory lock, protected by database triggers that reject UPDATE/DELETE/TRUNCATE, and checkable via `GET /api/v1/ledger/verify`. Verification reads the whole table (no pagination or checkpoints), and a database superuser can still disable the triggers.
 - Telemetry retention drops whole expired monthly partitions and row-deletes expired rows in the current partition, so the 7-day default is not a pure cold delete. There is no multi-replica leader election for the job.
 - The Helm PostgreSQL workload uses a PersistentVolumeClaim (durability drill passes in CI) but is a single replica with no backups or HA. The chart is a local lab deployment, not a production-ready data platform.
