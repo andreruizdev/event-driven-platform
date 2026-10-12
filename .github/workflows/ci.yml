@@ -210,6 +210,8 @@ jobs:
           kubectl rollout status deployment/platform-engine --namespace event-driven-lab --timeout=300s
 
       - name: Run CDC restart drill
+        env:
+          ALLOW_KAFKA_DATA_LOSS_DRILL: "true"
         run: ./scripts/cdc-drill.sh
 
       - name: Run load and reconciliation test

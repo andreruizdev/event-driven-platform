@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Live Debezium CDC drill against the default chart configuration (outbox.publisher.mode=cdc).
-# Inserts outbox rows directly, restarts the connector between them, and asserts that each
-# row reaches the canonical topic exactly once and is marked processed.
+# Inserts outbox rows directly and drills connector, broker, and bridge recovery against the
+# canonical topic. Normal-path samples require exactly-once publication; outage replay is at-least-once.
 set -euo pipefail
 
 NS="${NAMESPACE:-event-driven-lab}"
@@ -9,6 +9,9 @@ TOPIC="eventdrivenmicroservices-outbox-events"
 CONNECTOR="eventdrivenmicroservices-postgres-outbox-connector"
 CONNECT_URL="http://localhost:8083/connectors/${CONNECTOR}"
 TIMEOUT="${DRILL_TIMEOUT_SECONDS:-90}"
+KAFKA_OUTAGE_ACTIVE=false
+PF_APP=""
+PF_TEMPO=""
 
 pg() {
   kubectl exec -n "$NS" deploy/eventdrivenmicroservices-postgres -- \
@@ -54,6 +57,34 @@ canonical_count() {
     --from-beginning --timeout-ms 15000 2>/dev/null | grep -c "$1" || true
 }
 
+is_unprocessed() {
+  [ "$(pg "SELECT processed FROM outbox_events WHERE id='$1'")" = "f" ]
+}
+
+ cleanup() {
+   local port_forward_pids=()
+   if [ -n "$PF_APP" ]; then
+     port_forward_pids+=("$PF_APP")
+   fi
+   if [ -n "$PF_TEMPO" ]; then
+     port_forward_pids+=("$PF_TEMPO")
+   fi
+   if [ "${#port_forward_pids[@]}" -gt 0 ]; then
+     kill "${port_forward_pids[@]}" 2>/dev/null || true
+   fi
+   if [ "$KAFKA_OUTAGE_ACTIVE" = "true" ] \
+       && ! kubectl scale -n "$NS" deployment/eventdrivenmicroservices-kafka --replicas=1 \
+           --timeout="${TIMEOUT}s" >/dev/null; then
+     echo "WARNING: unable to restore the Kafka deployment to one replica" >&2
+   fi
+ }
+ trap cleanup EXIT
+
+kafka_endpoints_empty() {
+  [ -z "$(kubectl get endpoints -n "$NS" eventdrivenmicroservices-kafka \
+    -o jsonpath='{.subsets[*].addresses[*].ip}')" ]
+}
+
 wait_for "connector and task RUNNING" connector_running
 
 first="$(cat /proc/sys/kernel/random/uuid)"
@@ -74,6 +105,51 @@ insert_event "$third"
 kubectl rollout status -n "$NS" deploy/eventdrivenmicroservices-debezium --timeout="${TIMEOUT}s"
 wait_for "connector RUNNING after Connect pod loss" connector_running
 wait_for "third row (written during Connect outage) marked processed" is_processed "$third"
+
+# The single-broker lab has no persistent Kafka volume, so this drill destroys broker-local
+# topics and offsets. Run it only in a disposable cluster with explicit operator opt-in.
+kafka_outage=""
+if [ "${ALLOW_KAFKA_DATA_LOSS_DRILL:-false}" = "true" ]; then
+  echo "Starting Kafka outage drill (broker-local Kafka data will be lost)"
+  KAFKA_OUTAGE_ACTIVE=true
+  kubectl scale -n "$NS" deployment/eventdrivenmicroservices-kafka --replicas=0 \
+    --timeout="${TIMEOUT}s" >/dev/null
+  wait_for "Kafka broker endpoint removed" kafka_endpoints_empty
+
+  kafka_outage="$(cat /proc/sys/kernel/random/uuid)"
+  insert_event "$kafka_outage"
+  wait_for "outbox row remains unprocessed while Kafka is down" is_unprocessed "$kafka_outage"
+
+  kubectl scale -n "$NS" deployment/eventdrivenmicroservices-kafka --replicas=1 \
+    --timeout="${TIMEOUT}s" >/dev/null
+  kubectl rollout status -n "$NS" deployment/eventdrivenmicroservices-kafka --timeout="${TIMEOUT}s"
+  KAFKA_OUTAGE_ACTIVE=false
+
+  kubectl exec -n "$NS" deploy/eventdrivenmicroservices-kafka -- \
+    cub kafka-ready -b localhost:9092 1 120 >/dev/null
+  kubectl rollout restart -n "$NS" deployment/eventdrivenmicroservices-debezium >/dev/null
+  kubectl rollout status -n "$NS" deployment/eventdrivenmicroservices-debezium --timeout="${TIMEOUT}s"
+  kubectl exec -n "$NS" deploy/eventdrivenmicroservices-kafka -- \
+    kafka-topics --bootstrap-server localhost:9092 --create --if-not-exists \
+      --topic eventdrivenmicroservices-outbox-events.DLT --partitions 1 --replication-factor 1 \
+      --config cleanup.policy=delete --config retention.ms=604800000 >/dev/null
+  connector_config="$(kubectl get configmap -n "$NS" eventdrivenmicroservices-debezium-connector-config \
+    -o jsonpath='{.data.postgres-outbox-connector\.json}')"
+  connect --request PUT --header 'Content-Type: application/json' \
+    --data-binary "$connector_config" "${CONNECT_URL}/config" >/dev/null
+
+  wait_for "connector and task RUNNING after Kafka recovery" connector_running
+  wait_for "row written during Kafka outage marked processed after recovery" is_processed "$kafka_outage"
+
+  outage_count="$(canonical_count "$kafka_outage")"
+  if [ "$outage_count" -lt 1 ]; then
+    echo "FAIL: no canonical message for ${kafka_outage} after Kafka recovery" >&2
+    exit 1
+  fi
+  echo "OK: ${outage_count} canonical message(s) for ${kafka_outage} after Kafka recovery"
+else
+  echo "SKIP: Kafka outage drill requires ALLOW_KAFKA_DATA_LOSS_DRILL=true; broker-local data is ephemeral"
+fi
 
 # Bridge crash: kill the platform pod right after the insert. Delivery is at-least-once, so the
 # row must end up processed with at least one canonical message (a replay may duplicate it).
@@ -169,7 +245,6 @@ kubectl -n "$NS" port-forward deploy/platform-engine 18080:8080 >/dev/null 2>&1 
 PF_APP=$!
 kubectl -n "$NS" port-forward deploy/eventdrivenmicroservices-tempo 13200:3200 >/dev/null 2>&1 &
 PF_TEMPO=$!
-trap 'kill $PF_APP $PF_TEMPO 2>/dev/null || true' EXIT
 sleep 5
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(kubectl -n "$NS" get secret eventdrivenmicroservices-secrets -o jsonpath='{.data.ADMIN_PASSWORD}' | base64 -d)}"
 curl -fsS -o /dev/null -u "admin:${ADMIN_PASSWORD}" -H "Content-Type: application/json" \
