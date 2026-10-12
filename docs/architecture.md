@@ -59,7 +59,7 @@ The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom H
 * `GET /api/v1/ledger/latest-hash`: Exposes the latest cryptographic head of the SHA-256 chain.
 * `GET /api/v1/ledger/verify`: Recomputes the full chain in append order and returns `valid`, `eventsChecked`, and the first invalid event ID and reason, if any. Optional `?recent=N` limits it to the latest N events (response `scope`). `ConnectorStateMonitor` polls Kafka Connect and exposes connector/task gauges that drive the `DebeziumConnectorNotRunning` and `DebeziumTaskFailed` alerts.
 * `GET /api/v1/outbox/status`: Returns current outbox backlog depth, oldest unprocessed record timestamp, and queue age.
-* `GET /`: Interactive web control room serving static WebFlux resources for operators and live demos.
+* `GET /`: Interactive web control room serving static WebFlux resources for operators and live demos. A Playwright/Chromium integration test exercises loan submission and transaction-anomaly evidence through the browser.
 
 ### Context Propagation
 Every HTTP response includes an `X-Correlation-Id` header (generated or preserved from client requests) and an `X-Trace-Id` header when the filter observes an active OpenTelemetry span. End-to-end trace continuity is not currently verified.
@@ -122,4 +122,3 @@ The local lab stack is packaged in the canonical Helm chart `deploy/helm/event-d
 * **Grafana:** Dashboards pre-provisioned with Prometheus, Tempo, and Loki datasources.
 * **Local deployment status:** The platform container runs non-root with a read-only root filesystem and external database/JWT secret references. PostgreSQL is a single-replica Deployment backed by a PersistentVolumeClaim (`postgres.persistence`, default 5Gi; a pod-replacement durability drill passes in CI) but has no backups or HA; several infrastructure images use `latest`, and not all pods have probes or equivalent hardening. Treat this chart as a local lab, not production-ready deployment configuration.
 Current verification evidence and implementation priorities live in [engineering-guide.md](engineering-guide.md).
-

@@ -88,7 +88,11 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
           cache: 'gradle'
-          
+
+      - name: Install Playwright Chromium
+        working-directory: ./apps/platform-engine
+        run: ./gradlew installPlaywrightChromium
+
       - name: Build and Test Platform Engine (Java)
         working-directory: ./apps/platform-engine
         run: ./gradlew build
@@ -156,6 +160,11 @@ jobs:
 
       - name: Run PostgreSQL durability drill
         run: ./scripts/postgres-durability-drill.sh
+
+      - name: Verify PostgreSQL backup and restore
+        env:
+          BACKUP_FILE: /tmp/eventdrivenmicroservices-postgres.dump
+        run: ./scripts/postgres-backup-verify.sh
 
       - name: Dump diagnostics on failure
         if: failure()

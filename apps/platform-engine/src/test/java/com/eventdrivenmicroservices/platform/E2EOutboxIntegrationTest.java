@@ -1,6 +1,10 @@
 package com.eventdrivenmicroservices.platform;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Playwright;
 import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyAlertOutboxRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.EventEnvelope;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.LedgerEventRepository;
@@ -21,6 +25,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.KafkaContainer;
@@ -83,6 +88,9 @@ public class E2EOutboxIntegrationTest {
 
     @Autowired
     private org.springframework.test.web.reactive.server.WebTestClient webTestClient;
+
+    @LocalServerPort
+    private int localServerPort;
 
     @Autowired
     private com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEventRepository outboxEventRepository;
@@ -153,6 +161,36 @@ public class E2EOutboxIntegrationTest {
         Assertions.assertEquals(64, ledgerEvent.getCurrentHash().length());
 
         System.out.println("[E2E] Loan -> PostgreSQL/outbox -> Kafka -> ledger verified.");
+    }
+
+    @Test
+    void browserCompletesLoanAndVelocityWorkflowsAndShowsEvidence() {
+        String password = System.getenv().getOrDefault("SPRING_SECURITY_USER_PASSWORD", "local-dev-password");
+        String applicantId = UUID.randomUUID().toString();
+
+        try (Playwright playwright = Playwright.create();
+             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+             Page page = browser.newPage()) {
+            page.navigate("http://localhost:" + localServerPort);
+            page.locator("#username").fill("admin");
+            page.locator("#password").fill(password);
+            page.locator("#saveCredentials").click();
+
+            page.locator("#applicantId").fill(applicantId);
+            page.locator("#submitLoan").click();
+            page.locator("#loanResult").waitFor(new com.microsoft.playwright.Locator.WaitForOptions()
+                    .setTimeout(30_000));
+            page.waitForFunction("id => document.querySelector('#loanResult').textContent.includes(id)", applicantId);
+            page.locator("#recentEventsBody").getByText("ApplicationSubmitted")
+                    .waitFor(new com.microsoft.playwright.Locator.WaitForOptions().setTimeout(30_000));
+
+            page.locator("#merchantId").fill("browser-test-" + UUID.randomUUID());
+            page.locator("#sendBurst").click();
+            page.waitForFunction("() => document.querySelector('#transactionResult').textContent.startsWith('Submitted 6 transactions')",
+                    null, new Page.WaitForFunctionOptions().setTimeout(30_000));
+            page.locator("#recentEventsBody").getByText("TransactionAnomalyDetected").first()
+                    .waitFor(new com.microsoft.playwright.Locator.WaitForOptions().setTimeout(30_000));
+        }
     }
 
     @Test

@@ -65,6 +65,13 @@ dependencies {
     testImplementation 'org.testcontainers:postgresql:1.21.4'
     testImplementation 'org.testcontainers:kafka:1.21.4'
     testImplementation 'com.tngtech.archunit:archunit-junit5:1.2.1'
+    testImplementation 'com.microsoft.playwright:playwright:1.52.0'
+}
+
+tasks.register('installPlaywrightChromium', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.microsoft.playwright.CLI'
+    args 'install', '--with-deps', 'chromium'
 }
 
 tasks.named('test') {
