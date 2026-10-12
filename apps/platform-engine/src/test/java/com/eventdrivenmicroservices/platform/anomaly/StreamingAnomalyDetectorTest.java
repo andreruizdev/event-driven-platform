@@ -80,4 +80,19 @@ class StreamingAnomalyDetectorTest {
                 .expectNextMatches(AnomalyScore::isAnomaly)
                 .verifyComplete();
     }
+
+    @Test
+    void testTelemetry_NonFiniteOrExtremeValues_AreIgnoredWithoutPollutingWindow() {
+        for (double bad : new double[] {Double.NaN, Double.POSITIVE_INFINITY, 1.0e300}) {
+            StepVerifier.create(detector.evaluateTelemetryZScore("bad-device", bad))
+                    .expectNextMatches(score -> !score.isAnomaly())
+                    .verifyComplete();
+        }
+        for (int i = 0; i < 6; i++) {
+            detector.evaluateTelemetryZScore("bad-device", 10.0 + (i % 2)).block();
+        }
+        StepVerifier.create(detector.evaluateTelemetryZScore("bad-device", 500.0))
+                .expectNextMatches(AnomalyScore::isAnomaly)
+                .verifyComplete();
+    }
 }

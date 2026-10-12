@@ -1,5 +1,6 @@
 package com.eventdrivenmicroservices.platform.application;
 
+import static com.eventdrivenmicroservices.platform.config.LogSanitizer.safe;
 import com.eventdrivenmicroservices.platform.anomaly.StreamingAnomalyDetector;
 import com.eventdrivenmicroservices.platform.model.TelemetryEvent;
 import com.eventdrivenmicroservices.platform.model.TelemetryPayload;
@@ -46,7 +47,7 @@ public class TelemetryProcessingServiceImpl implements TelemetryProcessingServic
     // This perfectly resolves the distributed systems 'dual-write' problem—if the database commits, 
     // Debezium will read the WAL and Kafka will receive the event. If it fails, neither commits.
     public Mono<Void> processPayloadAsync(TelemetryPayload payload) {
-        log.info("[{}] Processing telemetry payload async for device: {}", Thread.currentThread().getName(), payload.getDeviceId());
+        log.info("[{}] Processing telemetry payload async for device: {}", Thread.currentThread().getName(), safe(payload.getDeviceId()));
         
         TelemetryEvent event = new TelemetryEvent(
             payload.getDeviceId(),
@@ -83,7 +84,7 @@ public class TelemetryProcessingServiceImpl implements TelemetryProcessingServic
                         Mono<OutboxEvent> saveOutbox = outboxRepository.save(outboxEvent);
 
                         if (anomalyScore.isAnomaly()) {
-                            log.warn("[ANOMALY REACTION] Telemetry Z-Score outlier flagged for device: {}", payload.getDeviceId());
+                            log.warn("[ANOMALY REACTION] Telemetry Z-Score outlier flagged for device: {}", safe(payload.getDeviceId()));
                             return ledgerService.appendEvent("TELEMETRY_ANOMALY", payloadStr)
                                     .then(saveOutbox);
                         }

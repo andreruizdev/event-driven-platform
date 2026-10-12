@@ -1,5 +1,6 @@
 package com.eventdrivenmicroservices.platform.infrastructure.outbox;
 
+import static com.eventdrivenmicroservices.platform.config.LogSanitizer.safe;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.eventdrivenmicroservices.platform.infrastructure.observability.OutboxMetrics;
@@ -91,7 +92,7 @@ public class OutboxProcessorService {
     private Mono<OutboxEvent> publishEvent(OutboxEvent event) {
         if (kafkaTemplate != null) {
             log.info("Publishing outbox event to Kafka -> Topic: eventdrivenmicroservices-outbox-events, Type: {}, AggregateId: {}",
-                    event.getEventType(), event.getAggregateId());
+                    safe(event.getEventType()), safe(event.getAggregateId()));
             ProducerRecord<String, String> record = new ProducerRecord<>(
                     "eventdrivenmicroservices-outbox-events", event.getAggregateId(), envelope(event));
             if (event.getTraceparent() != null && !event.getTraceparent().isBlank()) {
@@ -105,7 +106,7 @@ public class OutboxProcessorService {
                     .doOnError(err -> log.error("Failed to publish outbox event to Kafka: {}", event.getId(), err));
         } else {
             log.info("[Local Dev / Test] KafkaTemplate not configured. Simulating event publish -> Type: {}, AggregateId: {}",
-                    event.getEventType(), event.getAggregateId());
+                    safe(event.getEventType()), safe(event.getAggregateId()));
             return Mono.just(event);
         }
     }

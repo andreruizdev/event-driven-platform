@@ -1,5 +1,6 @@
 package com.eventdrivenmicroservices.platform.anomaly;
 
+import static com.eventdrivenmicroservices.platform.config.LogSanitizer.safe;
 import com.eventdrivenmicroservices.platform.infrastructure.observability.AnomalyMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +36,8 @@ public class StreamingAnomalyDetector {
     private static final int VELOCITY_COUNT_THRESHOLD = 5;
     private static final int TELEMETRY_WINDOW_SIZE = 20;
     private static final double Z_SCORE_THRESHOLD = 3.0;
+    // Bounds caller-supplied metrics so squared deviations cannot overflow to infinity.
+    private static final double MAX_METRIC_MAGNITUDE = 1.0e12;
 
     public StreamingAnomalyDetector(AnomalyMetrics metrics) {
         this(metrics, null);
@@ -75,7 +78,7 @@ public class StreamingAnomalyDetector {
      * Evaluates telemetry metric Z-Score outliers across distributed nodes.
      */
     public Mono<AnomalyScore> evaluateTelemetryZScore(String deviceId, double metricValue) {
-        if (deviceId == null) {
+        if (deviceId == null || !Double.isFinite(metricValue) || Math.abs(metricValue) > MAX_METRIC_MAGNITUDE) {
             return Mono.just(AnomalyScore.normal());
         }
 
@@ -120,7 +123,7 @@ public class StreamingAnomalyDetector {
 
                     if (count >= VELOCITY_COUNT_THRESHOLD || totalSum.compareTo(VELOCITY_AMOUNT_THRESHOLD) > 0) {
                         String details = String.format("Distributed Velocity Spike Detected: %d transactions totaling $%s in window", count, totalSum);
-                        log.warn("[DISTRIBUTED ANOMALY DETECTED] Account: {} | {}", accountId, details);
+                        log.warn("[DISTRIBUTED ANOMALY DETECTED] Account: {} | {}", safe(accountId), details);
                         metrics.recordAnomaly("VELOCITY_SPIKE");
                         return AnomalyScore.flagged("FINANCIAL_VELOCITY_SPIKE", (double) count, details);
                     }
@@ -174,7 +177,7 @@ public class StreamingAnomalyDetector {
 
             if (zScore >= Z_SCORE_THRESHOLD) {
                 String details = String.format("Distributed Z-Score Outlier: Value=%.2f, Mean=%.2f, StdDev=%.2f, Z-Score=%.2f", metricValue, mean, stddev, zScore);
-                log.warn("[DISTRIBUTED ANOMALY DETECTED] Device: {} | {}", deviceId, details);
+                log.warn("[DISTRIBUTED ANOMALY DETECTED] Device: {} | {}", safe(deviceId), details);
                 metrics.recordAnomaly("Z_SCORE_OUTLIER");
                 return AnomalyScore.flagged("TELEMETRY_Z_SCORE_OUTLIER", zScore, details);
             }
@@ -208,7 +211,7 @@ public class StreamingAnomalyDetector {
 
                 if (count >= VELOCITY_COUNT_THRESHOLD || totalSum.compareTo(VELOCITY_AMOUNT_THRESHOLD) > 0) {
                     String details = String.format("Velocity Spike Detected: %d transactions totaling $%s in window", count, totalSum);
-                    log.warn("[ANOMALY DETECTED] Account: {} | {}", accountId, details);
+                    log.warn("[ANOMALY DETECTED] Account: {} | {}", safe(accountId), details);
                     metrics.recordAnomaly("VELOCITY_SPIKE");
                     return AnomalyScore.flagged("FINANCIAL_VELOCITY_SPIKE", (double) count, details);
                 }

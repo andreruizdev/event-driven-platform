@@ -1,5 +1,6 @@
 package com.eventdrivenmicroservices.platform.application;
 
+import static com.eventdrivenmicroservices.platform.config.LogSanitizer.safe;
 import com.eventdrivenmicroservices.platform.anomaly.StreamingAnomalyDetector;
 import com.eventdrivenmicroservices.platform.model.FinancialTransaction;
 import com.eventdrivenmicroservices.platform.model.FinancialTransactionPayload;
@@ -42,7 +43,7 @@ public class TransactionProcessingServiceImpl implements TransactionProcessingSe
     @Override
     @Transactional
     public Mono<Void> processTransactionAsync(FinancialTransactionPayload payload, String traceparent) {
-        log.info("Processing financial transaction: {} amount: {}", payload.getTransactionId(), payload.getAmount());
+        log.info("Processing financial transaction: {} amount: {}", safe(payload.getTransactionId()), payload.getAmount());
         
         FinancialTransaction event = new FinancialTransaction();
         event.setTransactionId(payload.getTransactionId());
@@ -82,7 +83,7 @@ public class TransactionProcessingServiceImpl implements TransactionProcessingSe
                         Mono<OutboxEvent> saveOutbox = outboxRepository.save(outboxEvent);
 
                         if (anomalyScore.isAnomaly()) {
-                            log.warn("[ANOMALY REACTION] Financial velocity anomaly flagged for merchant: {}", trackerKey);
+                            log.warn("[ANOMALY REACTION] Financial velocity anomaly flagged for merchant: {}", safe(trackerKey));
                             return ledgerService.appendEvent("ANOMALY_FLAGGED", payloadStr)
                                     .then(saveOutbox);
                         }

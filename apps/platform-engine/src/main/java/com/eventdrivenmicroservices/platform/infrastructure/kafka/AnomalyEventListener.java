@@ -1,5 +1,6 @@
 package com.eventdrivenmicroservices.platform.infrastructure.kafka;
 
+import static com.eventdrivenmicroservices.platform.config.LogSanitizer.safe;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.EventEnvelope;
@@ -113,7 +114,7 @@ public class AnomalyEventListener {
             throw new IllegalStateException("Interrupted while publishing invalid event to DLT", exception);
         }
         log.error("Routed invalid event from {}-{}@{} to {}: {}",
-            record.topic(), record.partition(), record.offset(), DEAD_LETTER_TOPIC, message);
+            record.topic(), record.partition(), record.offset(), DEAD_LETTER_TOPIC, safe(message));
     }
 
     private void addHeader(ProducerRecord<String, String> record, String name, String value) {
