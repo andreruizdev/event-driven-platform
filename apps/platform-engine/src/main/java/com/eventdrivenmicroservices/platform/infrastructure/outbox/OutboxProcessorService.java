@@ -18,7 +18,7 @@ import java.util.UUID;
 
 @Service
 @Slf4j
-@ConditionalOnProperty(prefix = "app.outbox.publisher", name = "mode", havingValue = "poller", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "app.outbox.publisher", name = "mode", havingValue = "poller")
 public class OutboxProcessorService {
 
     private final OutboxEventRepository outboxEventRepository;

@@ -5,7 +5,7 @@ global:
 
 outbox:
   publisher:
-    mode: poller
+    mode: cdc
 
 platformEngine:
   replicaCount: 1

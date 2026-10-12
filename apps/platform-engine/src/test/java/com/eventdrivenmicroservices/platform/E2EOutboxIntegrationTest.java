@@ -69,6 +69,7 @@ public class E2EOutboxIntegrationTest {
         registry.add("spring.flyway.url", () -> envOrDefault("SPRING_FLYWAY_URL", postgres::getJdbcUrl));
         registry.add("spring.flyway.user", () -> envOrDefault("SPRING_FLYWAY_USER", postgres::getUsername));
         registry.add("spring.flyway.password", () -> envOrDefault("SPRING_FLYWAY_PASSWORD", postgres::getPassword));
+        registry.add("app.outbox.publisher.mode", () -> "poller");
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         registry.add("spring.data.redis.host", () -> envOrDefault("SPRING_DATA_REDIS_HOST", redis::getHost));
         registry.add("spring.data.redis.port", () -> envOrDefault("SPRING_DATA_REDIS_PORT",

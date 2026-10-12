@@ -179,7 +179,7 @@ jobs:
           docker build -t platform-engine:local ./apps/platform-engine
           kind load docker-image platform-engine:local --name eventdrivenmicroservices-cluster
 
-      - name: Deploy Helm Chart in CDC mode
+      - name: Deploy Helm Chart (default CDC mode)
         run: |
           kubectl create namespace event-driven-lab --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic eventdrivenmicroservices-secrets \
@@ -191,7 +191,6 @@ jobs:
             --dry-run=client -o yaml | kubectl apply -f -
           helm upgrade --install event-driven-lab ./deploy/helm/event-driven-lab \
             --namespace event-driven-lab \
-            --set outbox.publisher.mode=cdc \
             --set platformEngine.image.repository=platform-engine \
             --set platformEngine.image.pullPolicy=Never \
             --set platformEngine.image.tag=local \

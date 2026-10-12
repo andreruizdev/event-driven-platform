@@ -30,6 +30,7 @@ class IntegrationTests {
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("app.outbox.publisher.mode", () -> "poller");
         registry.add("spring.r2dbc.url", () -> envOrDefault("SPRING_R2DBC_URL",
                 () -> postgres.getJdbcUrl().replace("jdbc", "r2dbc")));
         registry.add("spring.r2dbc.username", () -> envOrDefault("SPRING_R2DBC_USERNAME", postgres::getUsername));

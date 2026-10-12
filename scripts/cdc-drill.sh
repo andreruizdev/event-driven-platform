@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live Debezium CDC drill. Requires a cluster deployed with --set outbox.publisher.mode=cdc.
+# Live Debezium CDC drill against the default chart configuration (outbox.publisher.mode=cdc).
 # Inserts outbox rows directly, restarts the connector between them, and asserts that each
 # row reaches the canonical topic exactly once and is marked processed.
 set -euo pipefail
@@ -98,5 +98,25 @@ if [ "$fourth_count" -lt 1 ]; then
   exit 1
 fi
 echo "OK: ${fourth_count} canonical message(s) for ${fourth} after bridge crash (at-least-once)"
+
+# Latency: sequential single-event inserts; latency is processed_at - created_at on the same host clock.
+LATENCY_SAMPLES="${CDC_LATENCY_SAMPLES:-20}"
+LATENCY_P95_BUDGET_MS="${CDC_LATENCY_P95_BUDGET_MS:-500}"
+latency_ids=()
+for _ in $(seq 1 "$LATENCY_SAMPLES"); do
+  id="$(cat /proc/sys/kernel/random/uuid)"
+  latency_ids+=("$id")
+  insert_event "$id"
+  wait_for "latency sample ${id} processed" is_processed "$id"
+done
+id_list="$(printf "'%s'," "${latency_ids[@]}")"; id_list="${id_list%,}"
+stats="$(pg "SELECT round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ms)::numeric), round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms)::numeric), round(max(ms)::numeric)
+  FROM (SELECT extract(epoch FROM (processed_at - created_at)) * 1000 AS ms FROM outbox_events WHERE id IN (${id_list})) s")"
+IFS='|' read -r p50 p95 pmax <<<"$stats"
+echo "CDC latency over ${LATENCY_SAMPLES} samples: p50=${p50}ms p95=${p95}ms max=${pmax}ms (budget p95 <= ${LATENCY_P95_BUDGET_MS}ms)"
+if [ "$p95" -gt "$LATENCY_P95_BUDGET_MS" ]; then
+  echo "FAIL: CDC p95 latency ${p95}ms exceeds ${LATENCY_P95_BUDGET_MS}ms" >&2
+  exit 1
+fi
 
 echo "CDC drill passed"
