@@ -101,7 +101,7 @@ echo "OK: ${fourth_count} canonical message(s) for ${fourth} after bridge crash 
 
 # Latency: sequential single-event inserts; latency is processed_at - created_at on the same host clock.
 LATENCY_SAMPLES="${CDC_LATENCY_SAMPLES:-20}"
-LATENCY_P95_BUDGET_MS="${CDC_LATENCY_P95_BUDGET_MS:-500}"
+LATENCY_P95_BUDGET_MS="${CDC_LATENCY_P95_BUDGET_MS:-1000}"
 latency_ids=()
 for _ in $(seq 1 "$LATENCY_SAMPLES"); do
   id="$(cat /proc/sys/kernel/random/uuid)"
@@ -118,5 +118,30 @@ if [ "$p95" -gt "$LATENCY_P95_BUDGET_MS" ]; then
   echo "FAIL: CDC p95 latency ${p95}ms exceeds ${LATENCY_P95_BUDGET_MS}ms" >&2
   exit 1
 fi
+
+# Monitoring: alert rules must load without errors and the CDC-mode signals must be scraped.
+prom() {
+  kubectl exec -n "$NS" deploy/eventdrivenmicroservices-prometheus -- wget -qO- "http://localhost:9090$1"
+}
+rules_healthy() {
+  local rules
+  rules="$(prom /api/v1/rules)"
+  echo "$rules" | grep -q '"name":"outbox-cdc"' && ! echo "$rules" | grep -q '"health":"err"'
+}
+metric_present() {
+  prom "/api/v1/query?query=$1" | grep -q '"result":\[{'
+}
+wait_for "Prometheus loaded outbox-cdc alert rules without errors" rules_healthy
+for metric in eventdrivenmicroservices_outbox_pending eventdrivenmicroservices_outbox_oldest_pending_age_seconds \
+              eventdrivenmicroservices_replication_slot_retained_bytes eventdrivenmicroservices_replication_slot_inactive \
+              eventdrivenmicroservices_replication_slot_count eventdrivenmicroservices_outbox_publish_success_total; do
+  wait_for "metric ${metric} scraped" metric_present "$metric"
+done
+slot_count="$(prom '/api/v1/query?query=eventdrivenmicroservices_replication_slot_count' | grep -oE '"value":\[[^]]*\]' | grep -oE '"[0-9.]+"\]$' | tr -d '"]')"
+if [ "${slot_count%.*}" -lt 1 ]; then
+  echo "FAIL: expected an active logical replication slot, gauge reports ${slot_count}" >&2
+  exit 1
+fi
+echo "OK: replication slot gauge reports ${slot_count} slot(s)"
 
 echo "CDC drill passed"

@@ -7,11 +7,66 @@ data:
     global:
       scrape_interval: 5s
 
+    rule_files:
+      - /etc/prometheus/outbox-alerts.yml
+
     scrape_configs:
       - job_name: 'platform-engine'
         metrics_path: '/actuator/prometheus'
         static_configs:
           - targets: ['platform-engine:8080']
+  outbox-alerts.yml: |
+    groups:
+      - name: outbox-cdc
+        rules:
+          - alert: OutboxProgressStalled
+            expr: eventdrivenmicroservices_outbox_oldest_pending_age_seconds > 60
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: Oldest unprocessed outbox event is older than 60s (connector or bridge stalled)
+          - alert: OutboxBacklogGrowing
+            expr: eventdrivenmicroservices_outbox_pending > 100
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: More than 100 outbox events are pending
+          - alert: OutboxPublishFailures
+            expr: increase(eventdrivenmicroservices_outbox_processing_failure_total[5m]) > 0
+            labels:
+              severity: warning
+            annotations:
+              summary: Outbox publish or processed-state failures in the last 5 minutes
+          - alert: ReplicationSlotInactive
+            expr: eventdrivenmicroservices_replication_slot_inactive > 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: A logical replication slot has no consumer; WAL is accumulating
+          - alert: ReplicationSlotWalRetentionHigh
+            expr: eventdrivenmicroservices_replication_slot_retained_bytes > 536870912
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: A replication slot retains more than 512 MiB of WAL
+          - alert: ReplicationSlotMissing
+            expr: eventdrivenmicroservices_replication_slot_count == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: No logical replication slot exists; CDC is not capturing changes
+          - alert: CdcConsumerLagHigh
+            expr: max(kafka_consumer_fetch_manager_records_lag_max) > 1000
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: A Kafka consumer in the platform is more than 1000 records behind
 
 ---
 apiVersion: apps/v1
@@ -44,6 +99,9 @@ spec:
         - name: config-volume
           mountPath: /etc/prometheus/prometheus.yml
           subPath: prometheus.yml
+        - name: config-volume
+          mountPath: /etc/prometheus/outbox-alerts.yml
+          subPath: outbox-alerts.yml
       volumes:
       - name: config-volume
         configMap:

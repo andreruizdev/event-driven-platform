@@ -2,6 +2,7 @@ package com.eventdrivenmicroservices.platform.infrastructure.kafka;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.eventdrivenmicroservices.platform.infrastructure.observability.OutboxMetrics;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.EventEnvelope;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEventRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -31,19 +32,31 @@ public class OutboxCdcBridge {
     private final ObjectMapper objectMapper;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final OutboxEventRepository outboxRepository;
+    private final OutboxMetrics metrics;
 
     public OutboxCdcBridge(ObjectMapper objectMapper,
                            KafkaTemplate<String, String> kafkaTemplate,
-                           OutboxEventRepository outboxRepository) {
+                           OutboxEventRepository outboxRepository,
+                           OutboxMetrics metrics) {
         this.objectMapper = objectMapper;
         this.kafkaTemplate = kafkaTemplate;
         this.outboxRepository = outboxRepository;
+        this.metrics = metrics;
     }
 
     @KafkaListener(
             topics = "${app.outbox.cdc-bridge.source-topic}",
             groupId = "${app.outbox.cdc-bridge.group-id}")
     public void forward(ConsumerRecord<String, String> record) throws Exception {
+        try {
+            doForward(record);
+        } catch (Exception e) {
+            metrics.recordProcessingFailure();
+            throw e;
+        }
+    }
+
+    private void doForward(ConsumerRecord<String, String> record) throws Exception {
         JsonNode change = objectMapper.readTree(record.value());
         if (!"c".equals(requiredText(change, "op"))) {
             throw new IllegalArgumentException("CDC outbox stream contains a non-insert operation");
@@ -70,12 +83,15 @@ public class OutboxCdcBridge {
             output.headers().add("traceparent", traceparent.getBytes(StandardCharsets.UTF_8));
         }
 
+        Instant publishStarted = Instant.now();
         kafkaTemplate.send(output).get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        metrics.recordPublishDuration(Duration.between(publishStarted, Instant.now()));
         Integer rowsUpdated = outboxRepository.markAsProcessed(eventId, Instant.now())
                 .block(DATABASE_TIMEOUT);
         if (rowsUpdated == null || rowsUpdated != 1) {
             throw new IllegalStateException("Published CDC outbox event could not be marked as processed: " + eventId);
         }
+        metrics.recordPublishSuccess();
         log.debug("Published CDC outbox event {} to canonical topic", eventId);
     }
 

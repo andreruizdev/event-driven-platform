@@ -3,6 +3,7 @@ package com.eventdrivenmicroservices.platform.infrastructure.kafka;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.eventdrivenmicroservices.platform.infrastructure.observability.OutboxMetrics;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEventRepository;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -39,16 +40,20 @@ class OutboxCdcBridgeTest {
     private OutboxEventRepository outboxRepository;
     private ObjectMapper objectMapper;
     private OutboxCdcBridge bridge;
+    private io.micrometer.core.instrument.simple.SimpleMeterRegistry registry;
+    private OutboxMetrics metrics;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
+        registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        metrics = new OutboxMetrics(registry);
         kafkaTemplate = mock(KafkaTemplate.class);
         outboxRepository = mock(OutboxEventRepository.class);
         objectMapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        bridge = new OutboxCdcBridge(objectMapper, kafkaTemplate, outboxRepository);
+        bridge = new OutboxCdcBridge(objectMapper, kafkaTemplate, outboxRepository, metrics);
         when(kafkaTemplate.send(any(ProducerRecord.class)))
                 .thenReturn(CompletableFuture.completedFuture(null));
         when(outboxRepository.markAsProcessed(eq(EVENT_ID), any(Instant.class)))
@@ -74,6 +79,8 @@ class OutboxCdcBridgeTest {
         assertEquals(TRACEPARENT, new String(
                 published.headers().lastHeader("traceparent").value(), StandardCharsets.UTF_8));
         verify(outboxRepository).markAsProcessed(eq(EVENT_ID), any(Instant.class));
+        assertEquals(1.0, registry.counter("eventdrivenmicroservices.outbox.publish.success").count());
+        assertEquals(0.0, registry.counter("eventdrivenmicroservices.outbox.processing.failure").count());
     }
 
     @Test
@@ -86,6 +93,7 @@ class OutboxCdcBridgeTest {
         assertThrows(ExecutionException.class, () -> bridge.forward(record(CDC_CHANGE)));
 
         verify(outboxRepository, never()).markAsProcessed(any(UUID.class), any(Instant.class));
+        assertEquals(1.0, registry.counter("eventdrivenmicroservices.outbox.processing.failure").count());
     }
 
     @Test
