@@ -282,33 +282,46 @@ public class E2EOutboxIntegrationTest {
     private com.eventdrivenmicroservices.platform.application.DataComplianceService dataComplianceService;
 
     @Test
-    void retentionDropsExpiredPartitionsDeletesExpiredRowsAndKeepsRecentData() {
-        databaseClient.sql("CREATE TABLE IF NOT EXISTS telemetry_events_y2020m01 PARTITION OF telemetry_events "
-                        + "FOR VALUES FROM ('2020-01-01 00:00:00+00') TO ('2020-02-01 00:00:00+00')")
+    void retentionDropsExpiredPartitionsAndKeepsRecentData() {
+        var expiredHour = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC)
+                .minusDays(8).truncatedTo(java.time.temporal.ChronoUnit.HOURS);
+        String expiredPartition = "telemetry_events_y" + expiredHour.format(
+                java.time.format.DateTimeFormatter.ofPattern("yyyy'm'MM'd'dd'h'HH"));
+        String expiredEnd = expiredHour.plusHours(1).toString();
+        databaseClient.sql("CREATE TABLE IF NOT EXISTS " + expiredPartition + " PARTITION OF telemetry_events "
+                        + "FOR VALUES FROM ('" + expiredHour + "') TO ('" + expiredEnd + "')")
                 .then().block(Duration.ofSeconds(5));
         String insert = "INSERT INTO telemetry_events (device_id, timestamp, log_level, raw_payload) "
                 + "VALUES ('retention-drill', '%s', 'INFO', '{}')";
-        databaseClient.sql(insert.formatted("2020-01-15 00:00:00+00")).then().block(Duration.ofSeconds(5));
-        databaseClient.sql(insert.formatted("2019-06-15 00:00:00+00")).then().block(Duration.ofSeconds(5));
+        databaseClient.sql(insert.formatted(expiredHour.plusMinutes(15))).then().block(Duration.ofSeconds(5));
+        databaseClient.sql("INSERT INTO telemetry_events (device_id, timestamp, log_level, raw_payload) "
+                        + "VALUES ('retention-default-drill', '2020-01-15 00:00:00+00', 'INFO', '{}')")
+                .then().block(Duration.ofSeconds(5));
         databaseClient.sql(insert.formatted(java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC))).then()
                 .block(Duration.ofSeconds(5));
 
         dataComplianceService.executeDataPurge().block(Duration.ofSeconds(30));
 
         Long expiredPartitions = databaseClient.sql(
-                        "SELECT count(*) AS c FROM pg_class WHERE relname = 'telemetry_events_y2020m01'")
+                        "SELECT count(*) AS c FROM pg_class WHERE relname = '" + expiredPartition + "'")
                 .map((row, meta) -> row.get("c", Long.class)).one().block(Duration.ofSeconds(5));
         Long remaining = databaseClient.sql(
                         "SELECT count(*) AS c FROM telemetry_events WHERE device_id = 'retention-drill'")
                 .map((row, meta) -> row.get("c", Long.class)).one().block(Duration.ofSeconds(5));
+        Long expiredOverflowRows = databaseClient.sql(
+                        "SELECT count(*) AS c FROM telemetry_events WHERE device_id = 'retention-default-drill'")
+                .map((row, meta) -> row.get("c", Long.class)).one().block(Duration.ofSeconds(5));
+        var futureHour = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC)
+                .truncatedTo(java.time.temporal.ChronoUnit.HOURS).plusHours(168);
+        String futurePartition = "telemetry_events_y" + futureHour.format(
+                java.time.format.DateTimeFormatter.ofPattern("yyyy'm'MM'd'dd'h'HH"));
         Long futurePartitions = databaseClient.sql(
-                        "SELECT count(*) AS c FROM pg_class WHERE relname = 'telemetry_events_y"
-                                + java.time.YearMonth.now(java.time.ZoneOffset.UTC).plusMonths(3)
-                                        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy'm'MM")) + "'")
+                        "SELECT count(*) AS c FROM pg_class WHERE relname = '" + futurePartition + "'")
                 .map((row, meta) -> row.get("c", Long.class)).one().block(Duration.ofSeconds(5));
 
         Assertions.assertEquals(0L, expiredPartitions);
         Assertions.assertEquals(1L, remaining);
+        Assertions.assertEquals(0L, expiredOverflowRows);
         Assertions.assertEquals(1L, futurePartitions);
     }
 

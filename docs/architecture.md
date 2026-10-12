@@ -12,6 +12,8 @@ This document describes the implementation, not a target production architecture
 
 The platform operates as an observable modular monolith deployed to Kubernetes via Helm. All core financial ingestion, outbox dispatch, stream processing, anomaly detection, and cryptographic ledgering run within `platform-engine`, backed by PostgreSQL, Redis, and Apache Kafka.
 
+Telemetry is stored in a PostgreSQL table partitioned by UTC hour (migration V6). The hourly compliance lifecycle cold-drops partitions only after the whole hour is beyond the seven-day cutoff; timestamps outside the provisioned range use a default partition whose expired rows are handled separately. V6 takes an exclusive table lock and rewrites existing telemetry, so larger-volume upgrades need a tested maintenance window.
+
 ```mermaid
 flowchart TD
     Client[HTTP Client / Control Room UI] -->|HTTP / REST| API[platform-engine WebFlux]
@@ -120,5 +122,5 @@ The local lab stack is packaged in the canonical Helm chart `deploy/helm/event-d
 * **Prometheus:** Metrics scraping endpoint monitoring throughput, JVM metrics, and custom anomaly counters.
 * **Grafana Loki:** Centralized log aggregation across all Kubernetes pods.
 * **Grafana:** Dashboards pre-provisioned with Prometheus, Tempo, and Loki datasources.
-* **Local deployment status:** The platform container runs non-root with a read-only root filesystem and external database/JWT secret references. PostgreSQL is a single-replica Deployment backed by a PersistentVolumeClaim (`postgres.persistence`, default 5Gi; a pod-replacement durability drill passes in CI) but has no backups or HA; several infrastructure images use `latest`, and not all pods have probes or equivalent hardening. Treat this chart as a local lab, not production-ready deployment configuration.
+* **Local deployment status:** The platform container runs non-root with a read-only root filesystem and external database/JWT secret references. PostgreSQL is a single-replica Deployment backed by a PersistentVolumeClaim (`postgres.persistence`, default 5Gi; pod-replacement durability and manual backup/restore drills pass in CI), but has no scheduled/off-site backups or HA; several infrastructure images use `latest`, and not all pods have probes or equivalent hardening. Treat this chart as a local lab, not production-ready deployment configuration.
 Current verification evidence and implementation priorities live in [engineering-guide.md](engineering-guide.md).

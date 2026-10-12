@@ -102,7 +102,8 @@ jobs:
         run: |
           for report in \
             build/test-results/test/TEST-com.eventdrivenmicroservices.platform.IntegrationTests.xml \
-            build/test-results/test/TEST-com.eventdrivenmicroservices.platform.E2EOutboxIntegrationTest.xml; do
+            build/test-results/test/TEST-com.eventdrivenmicroservices.platform.E2EOutboxIntegrationTest.xml \
+            build/test-results/test/TEST-com.eventdrivenmicroservices.platform.infrastructure.postgres.TelemetryHourlyMigrationTest.xml; do
             if [ ! -f "$report" ]; then
               echo "Missing integration test report: $report"
               exit 1

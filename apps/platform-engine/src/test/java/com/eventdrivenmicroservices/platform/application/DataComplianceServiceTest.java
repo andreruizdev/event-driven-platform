@@ -2,14 +2,12 @@ package com.eventdrivenmicroservices.platform.application;
 
 import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyAlertOutboxRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEventRepository;
-import com.eventdrivenmicroservices.platform.infrastructure.postgres.TelemetryEventRepository;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.YearMonth;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -23,59 +21,62 @@ class DataComplianceServiceTest {
     private static final Instant CUTOFF = Instant.parse("2026-10-04T02:00:00Z");
 
     @Test
-    void selectsEveryPartitionFullyOlderThanCutoff() {
+    void selectsEveryHourlyPartitionFullyOlderThanCutoff() {
         List<String> expired = DataComplianceService.expiredPartitions(List.of(
-                "telemetry_events_y2026m06", "telemetry_events_y2026m07", "telemetry_events_y2026m09",
-                "telemetry_events_y2026m10", "telemetry_events_y2026m11", "telemetry_events_default"), CUTOFF);
+                "telemetry_events_y2026m10d03h23", "telemetry_events_y2026m10d04h00",
+                "telemetry_events_y2026m10d04h01", "telemetry_events_y2026m10d04h02",
+                "telemetry_events_default"), CUTOFF);
 
         assertThat(expired).containsExactly(
-                "telemetry_events_y2026m06", "telemetry_events_y2026m07", "telemetry_events_y2026m09");
+                "telemetry_events_y2026m10d03h23", "telemetry_events_y2026m10d04h00",
+                "telemetry_events_y2026m10d04h01");
     }
 
     @Test
-    void keepsPartitionEndingExactlyAfterCutoffAndDropsOneEndingAtCutoff() {
-        Instant boundary = Instant.parse("2026-10-01T00:00:00Z");
+    void keepsPartitionEndingAfterCutoffAndDropsOneEndingExactlyAtCutoff() {
+        Instant boundary = Instant.parse("2026-10-04T02:00:00Z");
 
-        assertThat(DataComplianceService.expiredPartitions(List.of("telemetry_events_y2026m09"), boundary))
-                .containsExactly("telemetry_events_y2026m09");
-        assertThat(DataComplianceService.expiredPartitions(List.of("telemetry_events_y2026m09"),
+        assertThat(DataComplianceService.expiredPartitions(List.of("telemetry_events_y2026m10d04h01"), boundary))
+                .containsExactly("telemetry_events_y2026m10d04h01");
+        assertThat(DataComplianceService.expiredPartitions(List.of("telemetry_events_y2026m10d10h01"),
                 boundary.minusSeconds(1))).isEmpty();
     }
 
     @Test
-    void ignoresNamesThatAreNotStrictMonthlyPartitions() {
+    void ignoresNamesThatAreNotStrictHourlyPartitions() {
         List<String> expired = DataComplianceService.expiredPartitions(java.util.Arrays.asList(
-                "telemetry_events_y2020m13", "telemetry_events_y2020m01; DROP TABLE loan_applications",
+                "telemetry_events_y2020m13d01h00", "telemetry_events_y2020m01d32h00",
+                "telemetry_events_y2020m01d01h24", "telemetry_events_y2020m01d01h00; DROP TABLE loan_applications",
                 "loan_applications", null), CUTOFF);
 
         assertThat(expired).isEmpty();
     }
 
     @Test
-    void plansCurrentAndFutureMonths() {
-        assertThat(DataComplianceService.partitionsToCreate(YearMonth.of(2026, 11), 3))
-                .containsExactly(YearMonth.of(2026, 11), YearMonth.of(2026, 12),
-                        YearMonth.of(2027, 1), YearMonth.of(2027, 2));
+    void plansCurrentAndFutureHoursFromTheHourBoundary() {
+        assertThat(DataComplianceService.partitionsToCreate(LocalDateTime.parse("2026-11-01T12:34:56"), 3))
+                .containsExactly(LocalDateTime.parse("2026-11-01T12:00:00"),
+                        LocalDateTime.parse("2026-11-01T13:00:00"),
+                        LocalDateTime.parse("2026-11-01T14:00:00"),
+                        LocalDateTime.parse("2026-11-01T15:00:00"));
     }
 
     @Test
     void buildsUtcBoundedCreateStatement() {
-        assertThat(DataComplianceService.createPartitionDdl(YearMonth.of(2026, 12)))
-                .isEqualTo("CREATE TABLE IF NOT EXISTS telemetry_events_y2026m12 PARTITION OF telemetry_events "
-                        + "FOR VALUES FROM ('2026-12-01 00:00:00+00') TO ('2027-01-01 00:00:00+00')");
+        assertThat(DataComplianceService.createPartitionDdl(LocalDateTime.parse("2026-12-01T12:34:56")))
+                .isEqualTo("CREATE TABLE IF NOT EXISTS telemetry_events_y2026m12d01h12 "
+                        + "PARTITION OF telemetry_events FOR VALUES FROM ('2026-12-01 12:00:00+00') "
+                        + "TO ('2026-12-01 13:00:00+00')");
     }
 
     @Test
     void jobRunsOutboxPurgeEvenWhenTelemetryRetentionFails() {
-        TelemetryEventRepository telemetry = mock(TelemetryEventRepository.class);
         OutboxEventRepository outbox = mock(OutboxEventRepository.class);
         AnomalyAlertOutboxRepository alerts = mock(AnomalyAlertOutboxRepository.class);
         when(alerts.deletePublishedBefore(any(Instant.class))).thenReturn(Mono.just(1));
-        when(telemetry.deleteOldTelemetryEvents(any(OffsetDateTime.class)))
-                .thenReturn(Mono.error(new IllegalStateException("db down")));
         when(outbox.deleteProcessedOldEvents(any(Instant.class))).thenReturn(Mono.just(2));
 
-        StepVerifier.create(new DataComplianceService(telemetry, outbox, alerts, null).executeDataPurge())
+        StepVerifier.create(new DataComplianceService(outbox, alerts, null).executeDataPurge())
                 .verifyComplete();
 
         verify(outbox).deleteProcessedOldEvents(any(Instant.class));
