@@ -123,7 +123,7 @@ Run the single entry-point script to validate the toolchain, run Gradle tests, p
 - Telemetry retention drops whole expired monthly partitions and row-deletes expired rows in the current partition, so the 7-day default is not a pure cold delete. There is no multi-replica leader election for the job.
 - The Helm PostgreSQL workload uses a PersistentVolumeClaim (durability drill passes in CI) but is a single replica with no backups or HA. The chart is a local lab deployment, not a production-ready data platform.
 - The Docker-backed E2E tests need a Docker daemon compatible with the pinned Testcontainers. If your daemon requires a newer API version, set `api.version=1.44` in `~/.docker-java.properties`; otherwise they are skipped locally and CI runs them.
-- Trace headers are handled in some paths, but a complete live HTTP-to-Kafka-to-ledger trace has not been verified.
+- Trace propagation (HTTP, ledger, outbox row, CDC bridge, consumer) is asserted in Tempo by the CDC drill; the control-room trace link is not yet implemented.
 - `local-dev-password` is a local fallback credential only. Provide runtime secrets explicitly and do not reuse these credentials outside a disposable development environment.
 
 ## Five-Minute Demo
