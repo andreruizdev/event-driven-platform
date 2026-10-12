@@ -1,6 +1,7 @@
 const state = {
   username: localStorage.getItem('eventdriven.username') || 'admin',
-  password: ''
+  password: '',
+  timelineActive: false
 };
 
 const $ = (id) => document.getElementById(id);
@@ -141,6 +142,7 @@ function renderTimeline(timeline) {
 }
 
 async function loadTimeline(lookup) {
+  state.timelineActive = true;
   const eventId = lookup?.eventId ?? $('timelineEventId').value.trim();
   const correlationId = lookup?.correlationId ?? $('timelineCorrelationId').value.trim();
   if (Boolean(eventId) === Boolean(correlationId)) {
@@ -183,9 +185,11 @@ async function refreshEvidence() {
   $('outboxResult').textContent = 'Loading outbox status...';
   $('hashResult').textContent = 'Loading ledger head...';
   $('ledgerResult').textContent = 'Loading ledger verification...';
-  $('timelineStatus').textContent = 'Loading recent evidence...';
-  $('timelineStatus').dataset.state = 'loading';
-  $('workflowTimeline').replaceChildren();
+  if (!state.timelineActive) {
+    $('timelineStatus').textContent = 'Loading recent evidence...';
+    $('timelineStatus').dataset.state = 'loading';
+    $('workflowTimeline').replaceChildren();
+  }
   try {
     const [outbox, hash, verification, recentEvents] = await Promise.all([
       request('/api/v1/outbox/status'),
@@ -201,10 +205,12 @@ async function refreshEvidence() {
       scope: verification.scope
     });
     renderRecentEvents(recentEvents);
-    $('timelineStatus').textContent = recentEvents.length
-      ? 'Choose a recent event or enter an event ID or correlation ID.'
-      : 'No workflow events yet.';
-    $('timelineStatus').dataset.state = recentEvents.length ? 'loaded' : 'empty';
+    if (!state.timelineActive) {
+      $('timelineStatus').textContent = recentEvents.length
+        ? 'Choose a recent event or enter an event ID or correlation ID.'
+        : 'No workflow events yet.';
+      $('timelineStatus').dataset.state = recentEvents.length ? 'loaded' : 'empty';
+    }
   } catch (error) {
     show('outboxResult', `Unable to load evidence: ${error.message}`);
     const row = document.createElement('tr');
@@ -213,8 +219,10 @@ async function refreshEvidence() {
     cell.textContent = `Unable to load recent events: ${error.message}`;
     row.append(cell);
     $('recentEventsBody').replaceChildren(row);
-    $('timelineStatus').textContent = `Unable to load evidence: ${error.message}`;
-    $('timelineStatus').dataset.state = 'error';
+    if (!state.timelineActive) {
+      $('timelineStatus').textContent = `Unable to load evidence: ${error.message}`;
+      $('timelineStatus').dataset.state = 'error';
+    }
   }
 }
 

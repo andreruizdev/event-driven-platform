@@ -225,6 +225,59 @@ public class E2EOutboxIntegrationTest {
     }
 
     @Test
+    void browserTimelineShowsValidationEmptyLoadingAndErrorStates() {
+        String password = System.getenv().getOrDefault("SPRING_SECURITY_USER_PASSWORD", "local-dev-password");
+
+        try (Playwright playwright = Playwright.create();
+             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+             Page page = browser.newPage()) {
+            page.navigate("http://localhost:" + localServerPort);
+            page.locator("#username").fill("admin");
+            page.locator("#password").fill(password);
+            page.locator("#saveCredentials").click();
+
+            var status = page.locator("#timelineStatus");
+            var steps = page.locator("#workflowTimeline li");
+
+            page.locator("#loadTimeline").click();
+            status.getByText("Provide exactly one").waitFor();
+            Assertions.assertEquals("error", status.getAttribute("data-state"));
+            page.locator("#timelineEventId").fill(UUID.randomUUID().toString());
+            page.locator("#timelineCorrelationId").fill("also-set");
+            page.locator("#loadTimeline").click();
+            Assertions.assertEquals("error", status.getAttribute("data-state"));
+            Assertions.assertEquals(0, steps.count());
+
+            page.locator("#timelineEventId").fill("");
+            page.locator("#timelineCorrelationId").fill("no-such-correlation-" + UUID.randomUUID());
+            page.locator("#loadTimeline").click();
+            page.waitForFunction("() => document.querySelector('#timelineStatus').dataset.state === 'empty'");
+            Assertions.assertTrue(status.textContent().contains("No workflow events found"));
+            Assertions.assertEquals(0, steps.count());
+
+            page.evaluate("""
+                    () => {
+                      const realFetch = window.fetch.bind(window);
+                      window.__releaseTimeline = null;
+                      const gate = new Promise(resolve => { window.__releaseTimeline = resolve; });
+                      window.fetch = (input, init) => String(input).includes('/api/v1/outbox/timeline')
+                        ? gate.then(() => new Response('{"secret":"must-not-render"}',
+                            { status: 500, statusText: 'Server Error' }))
+                        : realFetch(input, init);
+                    }
+                    """);
+            page.locator("#loadTimeline").click();
+            page.waitForFunction("() => document.querySelector('#timelineStatus').dataset.state === 'loading'");
+            Assertions.assertEquals("true", page.locator("#workflowTimeline").getAttribute("aria-busy"));
+            page.evaluate("() => window.__releaseTimeline()");
+            page.waitForFunction("() => document.querySelector('#timelineStatus').dataset.state === 'error'");
+            Assertions.assertTrue(status.textContent().contains("Unable to load workflow evidence: 500"));
+            Assertions.assertFalse(page.locator("body").textContent().contains("must-not-render"));
+            Assertions.assertEquals("false", page.locator("#workflowTimeline").getAttribute("aria-busy"));
+        }
+    }
+
+    @Test
     void highValueTransactionPublishesAnomalyAlertWithTraceparent() throws Exception {
         Assertions.assertTrue(kafka.isRunning());
         Assertions.assertTrue(redis.isRunning());
