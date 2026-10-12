@@ -48,6 +48,28 @@ class LedgerControllerTest {
     }
 
     @Test
+    void limitsLedgerListAndBoundsVerifyWindow() {
+        LedgerEvent[] events = new LedgerEvent[5];
+        for (int i = 0; i < events.length; i++) {
+            events[i] = LedgerEvent.builder().id(UUID.randomUUID()).transactionType("T" + i).payload("{}")
+                    .previousHash("p").currentHash("c" + i).createdAt(OffsetDateTime.now()).build();
+        }
+        when(ledgerEventRepository.findAllByOrderByCreatedAtDesc()).thenReturn(Flux.just(events));
+        when(ledgerService.verifyRecent(1_000)).thenReturn(Mono.just(
+                new com.eventdrivenmicroservices.platform.application.LedgerVerification(true, 1_000, null, null, "RECENT:1000")));
+
+        webTestClient.get().uri("/api/v1/ledger?limit=2")
+                .headers(headers -> headers.setBasicAuth("admin", "test"))
+                .exchange().expectStatus().isOk()
+                .expectBody().jsonPath("$.length()").isEqualTo(2);
+
+        webTestClient.get().uri("/api/v1/ledger/verify?recent=1000")
+                .headers(headers -> headers.setBasicAuth("admin", "test"))
+                .exchange().expectStatus().isOk()
+                .expectBody().jsonPath("$.scope").isEqualTo("RECENT:1000");
+    }
+
+    @Test
     void listsLedgerEvents() {
         LedgerEvent event = LedgerEvent.builder()
                 .id(UUID.randomUUID())

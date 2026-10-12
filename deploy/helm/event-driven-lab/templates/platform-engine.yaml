@@ -46,6 +46,8 @@ spec:
           value: "eventdrivenmicroservices-redis"
         - name: SPRING_DATA_REDIS_PORT
           value: "6379"
+        - name: APP_OUTBOX_CONNECT_URL
+          value: "http://eventdrivenmicroservices-debezium:8083"
         - name: OUTBOX_PUBLISHER_MODE
           value: {{ .Values.outbox.publisher.mode | quote }}
         - name: EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_URL

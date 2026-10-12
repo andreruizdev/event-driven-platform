@@ -19,4 +19,7 @@ public interface LedgerEventRepository extends ReactiveCrudRepository<LedgerEven
 
     @Query("SELECT * FROM ledger_events ORDER BY seq ASC")
     Flux<LedgerEvent> findAllInChainOrder();
+
+    @Query("SELECT * FROM (SELECT * FROM ledger_events ORDER BY seq DESC LIMIT :limit) latest ORDER BY seq ASC")
+    Flux<LedgerEvent> findRecentInChainOrder(long limit);
 }

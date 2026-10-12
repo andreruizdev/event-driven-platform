@@ -83,6 +83,38 @@ class LedgerServiceVerificationTest {
                 .verifyComplete();
     }
 
+    @Test
+    void recentWindowIsAnchoredOnItsFirstStoredPreviousHash() {
+        LedgerEvent second = event("B", "{}", "a".repeat(64));
+        LedgerEvent third = event("C", "{}", second.getCurrentHash());
+        when(repository.findRecentInChainOrder(2)).thenReturn(Flux.just(second, third));
+
+        StepVerifier.create(service.verifyRecent(2))
+                .expectNextMatches(result -> result.valid() && result.eventsChecked() == 2 && "RECENT:2".equals(result.scope()))
+                .verifyComplete();
+    }
+
+    @Test
+    void recentWindowStillDetectsTamperingInsideTheWindow() {
+        LedgerEvent second = event("B", "{}", "a".repeat(64));
+        LedgerEvent third = event("C", "{}", second.getCurrentHash());
+        third.setPayload("{\"x\":9}");
+        when(repository.findRecentInChainOrder(2)).thenReturn(Flux.just(second, third));
+
+        StepVerifier.create(service.verifyRecent(2))
+                .expectNextMatches(result -> !result.valid() && third.getId().equals(result.firstInvalidEventId()))
+                .verifyComplete();
+    }
+
+    @Test
+    void fullVerificationReportsFullScope() {
+        when(repository.findAllInChainOrder()).thenReturn(Flux.empty());
+
+        StepVerifier.create(service.verifyChain())
+                .expectNextMatches(result -> "FULL".equals(result.scope()))
+                .verifyComplete();
+    }
+
     private static LedgerEvent event(String type, String payload, String previousHash) {
         return LedgerEvent.builder()
                 .id(UUID.randomUUID())

@@ -135,7 +135,8 @@ wait_for "Prometheus loaded outbox-cdc alert rules without errors" rules_healthy
 for metric in eventdrivenmicroservices_outbox_pending eventdrivenmicroservices_outbox_oldest_pending_age_seconds \
               eventdrivenmicroservices_replication_slot_retained_bytes eventdrivenmicroservices_replication_slot_inactive \
               eventdrivenmicroservices_replication_slot_count eventdrivenmicroservices_outbox_publish_success_total \
-              kafka_consumer_fetch_manager_records_lag_max; do
+              kafka_consumer_fetch_manager_records_lag_max eventdrivenmicroservices_connector_running \
+              eventdrivenmicroservices_connector_tasks_failed; do
   wait_for "metric ${metric} scraped" metric_present "$metric"
 done
 slot_count="$(prom '/api/v1/query?query=eventdrivenmicroservices_replication_slot_count' | grep -oE '"value":\[[^]]*\]' | grep -oE '"[0-9.]+"\]$' | tr -d '"]')"
@@ -144,6 +145,23 @@ if [ "${slot_count%.*}" -lt 1 ]; then
   exit 1
 fi
 echo "OK: replication slot gauge reports ${slot_count} slot(s)"
+
+connector_up() {
+  prom '/api/v1/query?query=eventdrivenmicroservices_connector_running' | grep -qE '"value":\[[^]]*"1"\]'
+}
+wait_for "Connect reports the connector RUNNING" connector_up
+
+# Alerting: pausing the connector must fire DebeziumConnectorNotRunning, and resuming must clear it.
+alert_state() {
+  prom /api/v1/alerts | grep -o '"alertname":"'"$1"'"[^}]*}[^]]*"state":"[a-z]*"' | grep -o '"state":"[a-z]*"' | head -1
+}
+alert_firing() { [ "$(alert_state DebeziumConnectorNotRunning)" = '"state":"firing"' ]; }
+alert_cleared() { [ -z "$(alert_state DebeziumConnectorNotRunning)" ]; }
+connect -X PUT "${CONNECT_URL}/pause" >/dev/null
+TIMEOUT=180 wait_for "DebeziumConnectorNotRunning alert FIRING while the connector is paused" alert_firing
+connect -X PUT "${CONNECT_URL}/resume" >/dev/null
+wait_for "connector RUNNING after resume" connector_running
+TIMEOUT=180 wait_for "DebeziumConnectorNotRunning alert cleared after resume" alert_cleared
 
 # One HTTP request must produce a single Tempo trace spanning HTTP, ledger, CDC publish and Kafka consume.
 TRACE_ID="$(openssl rand -hex 16)"

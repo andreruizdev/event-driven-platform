@@ -7,6 +7,7 @@ import com.eventdrivenmicroservices.platform.infrastructure.postgres.LedgerEvent
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -18,17 +19,23 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class LedgerController {
 
+    static final int MAX_LIST_LIMIT = 1000;
+    static final long MAX_VERIFY_WINDOW = 100_000;
+
     private final LedgerEventRepository ledgerEventRepository;
     private final LedgerService ledgerService;
 
     @GetMapping("/verify")
-    public Mono<LedgerVerification> verify() {
-        return ledgerService.verifyChain();
+    public Mono<LedgerVerification> verify(@RequestParam(required = false) Long recent) {
+        if (recent == null) {
+            return ledgerService.verifyChain();
+        }
+        return ledgerService.verifyRecent(Math.max(1, Math.min(recent, MAX_VERIFY_WINDOW)));
     }
 
     @GetMapping
-    public Flux<LedgerEvent> list() {
-        return ledgerEventRepository.findAllByOrderByCreatedAtDesc();
+    public Flux<LedgerEvent> list(@RequestParam(defaultValue = "100") int limit) {
+        return ledgerEventRepository.findAllByOrderByCreatedAtDesc().take(Math.max(1, Math.min(limit, MAX_LIST_LIMIT)));
     }
 
     @GetMapping("/latest-hash")

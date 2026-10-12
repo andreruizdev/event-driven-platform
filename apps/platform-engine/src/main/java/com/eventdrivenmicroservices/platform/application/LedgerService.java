@@ -52,7 +52,18 @@ public class LedgerService {
         return ledgerEventRepository.findAllInChainOrder()
                 .reduce(new ChainState(GENESIS_HASH, 0, null, null), this::advance)
                 .map(state -> new LedgerVerification(
-                        state.invalidEventId() == null, state.checked(), state.invalidEventId(), state.reason()));
+                        state.invalidEventId() == null, state.checked(), state.invalidEventId(), state.reason(), "FULL"));
+    }
+
+    /**
+     * Verifies only the latest {@code recent} events. The first event's stored previous hash is trusted as the
+     * anchor, so tampering before the window is not detected; use {@link #verifyChain()} for that.
+     */
+    public Mono<LedgerVerification> verifyRecent(long recent) {
+        return ledgerEventRepository.findRecentInChainOrder(recent)
+                .reduce(new ChainState(null, 0, null, null), this::advance)
+                .map(state -> new LedgerVerification(
+                        state.invalidEventId() == null, state.checked(), state.invalidEventId(), state.reason(), "RECENT:" + recent));
     }
 
     private ChainState advance(ChainState state, LedgerEvent event) {
@@ -60,7 +71,7 @@ public class LedgerService {
         if (state.invalidEventId() != null) {
             return new ChainState(state.expectedPreviousHash(), checked, state.invalidEventId(), state.reason());
         }
-        if (!state.expectedPreviousHash().equals(event.getPreviousHash())) {
+        if (state.expectedPreviousHash() != null && !state.expectedPreviousHash().equals(event.getPreviousHash())) {
             return new ChainState(state.expectedPreviousHash(), checked, event.getId(), "previous hash does not link to prior event");
         }
         String recomputed = calculateSHA256(event.getPreviousHash() + event.getTransactionType() + event.getPayload());
