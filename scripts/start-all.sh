@@ -70,22 +70,14 @@ fi
 
 # 6. Create Secrets and Deploy Helm Chart
 echo -e "\n[6/6] Deploying stack via Helm..."
-if [ ! -f .env ]; then
-  if [ -f .env.example ]; then
-    cp .env.example .env
-  else
-    cat <<EOF > .env
-EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD=local-dev-password
-DEBEZIUM_PASSWORD=local-dev-debezium-password
-SPRING_SECURITY_USER_PASSWORD=local-dev-password
-JWT_SECRET_KEY=local-dev-jwt-secret-key-32-bytes-long!
-EOF
+touch .env
+chmod 600 .env
+# Keys must match what the Helm chart reads; any missing key gets a random value.
+for key in POSTGRES_PASSWORD DEBEZIUM_PASSWORD JWT_SECRET_KEY GF_SECURITY_ADMIN_PASSWORD ADMIN_PASSWORD; do
+  if ! grep -q "^${key}=" .env; then
+    printf '%s=%s\n' "$key" "$(openssl rand -hex 24)" >> .env
   fi
-fi
-
-if ! grep -q '^DEBEZIUM_PASSWORD=' .env; then
-  printf '\nDEBEZIUM_PASSWORD=local-dev-debezium-password\n' >> .env
-fi
+done
 
 kubectl delete secret eventdrivenmicroservices-secrets --ignore-not-found
 kubectl create secret generic eventdrivenmicroservices-secrets --from-env-file=.env

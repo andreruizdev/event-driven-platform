@@ -42,7 +42,7 @@ The Windows wrapper is `apps/platform-engine/gradlew.bat`. The full local orches
 
 The local Terraform cluster and CI Kind cluster are both named `eventdrivenmicroservices-cluster`. CI builds and loads `platform-engine:local`, then installs chart `event-driven-lab` as release `event-driven-lab` in namespace `event-driven-lab`; the Helm image repository/tag overrides must remain aligned with that built image.
 
-For the UI and API, port-forward `svc/platform-engine` to local port 8080. Outside the `k8s` profile the `admin` / `local-dev-password` credentials are development fallbacks; the Helm deployment requires the secret key `ADMIN_PASSWORD` and `FallbackCredentialGuard` aborts startup if either the admin or database password is blank or the fallback. `scripts/demo.sh` and `scripts/demo.ps1` are request generators, not end-to-end assertion suites.
+For the UI and API, port-forward `svc/platform-engine` to local port 8080. Outside the `k8s` profile the `admin` / `local-dev-password` credentials are development fallbacks; the Helm deployment requires the secret key `ADMIN_PASSWORD` and `FallbackCredentialGuard` aborts startup if either the admin or database password is blank or the fallback. `scripts/demo.sh` is an assertion-based smoke test (health, loan, transactions, outbox drain, ledger growth and chain validity) run in CI; `scripts/demo.ps1` remains a request generator.
 
 ## Test Scope
 
@@ -137,7 +137,7 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 - [ ] Validate Grafana queries against live metrics; add connector/replication lag, consumer lag, event latency, failure, and recovery panels only for emitted signals.
 - [ ] Make the control room a workflow timeline keyed by event ID/correlation ID: accepted, persisted, published, anomaly/alert, ledger, retries, and trace link. Show pending/failure/loading/empty states without exposing sensitive payloads.
 - [ ] Remove the duplicate root/static UI assets or establish one tested canonical resource source; add browser tests for the loan and anomaly workflows.
-- [ ] Turn `scripts/demo.sh` into an assertion-based smoke test for the same visible outcomes, not just a request generator.
+- [x] Turn `scripts/demo.sh` into an assertion-based smoke test for the same visible outcomes, not just a request generator.
 
 **Exit gate:** A clean Kind deployment can run the demo and let an operator follow the same event through UI evidence, Kafka/ledger state, metrics, and Tempo.
 

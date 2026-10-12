@@ -209,6 +209,15 @@ jobs:
           LOAD_P95_BUDGET_MS: "2000"
         run: ./scripts/load-test.sh
 
+      - name: Run assertion-based demo
+        run: |
+          kubectl -n event-driven-lab port-forward deploy/platform-engine 18082:8080 >/dev/null 2>&1 &
+          PF=$!
+          trap 'kill $PF' EXIT
+          sleep 5
+          BASE_URL=http://localhost:18082 \
+          ADMIN_PASSWORD=ci-admin-password ./scripts/demo.sh
+
       - name: Dump diagnostics on failure
         if: failure()
         run: |

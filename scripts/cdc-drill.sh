@@ -134,7 +134,8 @@ metric_present() {
 wait_for "Prometheus loaded outbox-cdc alert rules without errors" rules_healthy
 for metric in eventdrivenmicroservices_outbox_pending eventdrivenmicroservices_outbox_oldest_pending_age_seconds \
               eventdrivenmicroservices_replication_slot_retained_bytes eventdrivenmicroservices_replication_slot_inactive \
-              eventdrivenmicroservices_replication_slot_count eventdrivenmicroservices_outbox_publish_success_total; do
+              eventdrivenmicroservices_replication_slot_count eventdrivenmicroservices_outbox_publish_success_total \
+              kafka_consumer_fetch_manager_records_lag_max; do
   wait_for "metric ${metric} scraped" metric_present "$metric"
 done
 slot_count="$(prom '/api/v1/query?query=eventdrivenmicroservices_replication_slot_count' | grep -oE '"value":\[[^]]*\]' | grep -oE '"[0-9.]+"\]$' | tr -d '"]')"

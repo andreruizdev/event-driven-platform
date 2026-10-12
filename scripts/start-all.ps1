@@ -71,21 +71,14 @@ kind load docker-image docker.io/event-driven-lab/platform-engine:latest --name 
 
 # 6. Create Secrets and Deploy Helm Chart
 Write-Host "`n[6/6] Deploying stack via Helm..." -ForegroundColor Yellow
-if (-not (Test-Path .env)) {
-    if (Test-Path .env.example) {
-        Copy-Item .env.example .env
-    } else {
-        @"
-EVENTDRIVENMICROSERVICES_DATABASE_LOCAL_PASSWORD=local-dev-password
-DEBEZIUM_PASSWORD=local-dev-debezium-password
-SPRING_SECURITY_USER_PASSWORD=local-dev-password
-JWT_SECRET_KEY=local-dev-jwt-secret-key-32-bytes-long!
-"@ | Set-Content .env
+if (-not (Test-Path .env)) { New-Item .env -ItemType File | Out-Null }
+# Keys must match what the Helm chart reads; any missing key gets a random value.
+foreach ($key in 'POSTGRES_PASSWORD','DEBEZIUM_PASSWORD','JWT_SECRET_KEY','GF_SECURITY_ADMIN_PASSWORD','ADMIN_PASSWORD') {
+    if (-not (Select-String -Path .env -Pattern "^$key=" -Quiet)) {
+        $bytes = New-Object byte[] 24
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+        Add-Content .env ("{0}={1}" -f $key, (($bytes | ForEach-Object { $_.ToString('x2') }) -join ''))
     }
-}
-
-if (-not (Select-String -Path .env -Pattern '^DEBEZIUM_PASSWORD=' -Quiet)) {
-    Add-Content .env 'DEBEZIUM_PASSWORD=local-dev-debezium-password'
 }
 
 kubectl delete secret eventdrivenmicroservices-secrets --ignore-not-found
