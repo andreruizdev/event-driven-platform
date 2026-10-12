@@ -54,7 +54,7 @@ These run without Docker:
 - Loan validation and anomaly scoring, including the control-room six-reading baseline followed by an outlier.
 - Outbox envelope, failure isolation, retry delay, and event-listener mocked contract.
 - Alert relay Kafka-send failure followed by retry-after-recovery (`AnomalyAlertOutboxRelayTest`); focused local run on 2026-10-09 passed all 3 tests, using a mocked Kafka broker.
-- JWT validation: HMAC-SHA256 signature, HS256-only (including rejecting `none`), mandatory `exp`, `nbf`, 30 s configurable skew, optional `JWT_ISSUER`/`JWT_AUDIENCE`, `sub` as principal, and the required-secret profile guard.
+- JWT validation: HMAC-SHA256 signature, HS256-only (including rejecting `none`), mandatory `exp`, `nbf`, 30 s configurable skew, optional `JWT_ISSUER`/`JWT_AUDIENCE`, `sub` as principal, and the required-secret profile guard. Rotation: `JWT_SECRET_KEY_PREVIOUS` secrets are tried after the current one (`SecurityConfigTest`).
 - ArchUnit rules for `Thread.sleep` and JDBC dependencies in API/application packages.
 
 ### Docker-backed tests

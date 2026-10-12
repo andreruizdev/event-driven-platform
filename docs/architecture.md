@@ -50,7 +50,7 @@ flowchart TD
 
 ## 2. Ingestion & API Layer
 
-The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom HMAC Bearer-token check. Bearer tokens must be HS256 JWTs with a valid signature, a numeric `exp` (30 s clock skew), an optional `nbf`, and, when `JWT_ISSUER` / `JWT_AUDIENCE` are set, matching `iss` / `aud`. The `sub` claim becomes the principal (default `eventdrivenmicroservices-edge-node`). Bearer tokens grant no authorities, so they can call authenticated ingestion endpoints but never the `ADMIN`-only `/actuator/**`. There is no key rotation or token issuer.
+The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom HMAC Bearer-token check. Bearer tokens must be HS256 JWTs with a valid signature, a numeric `exp` (30 s clock skew), an optional `nbf`, and, when `JWT_ISSUER` / `JWT_AUDIENCE` are set, matching `iss` / `aud`. The `sub` claim becomes the principal (default `eventdrivenmicroservices-edge-node`). Bearer tokens grant no authorities, so they can call authenticated ingestion endpoints but never the `ADMIN`-only `/actuator/**`. Rotation: the new secret goes in `JWT_SECRET_KEY` and retired ones in `JWT_SECRET_KEY_PREVIOUS` (comma-separated, optional chart secret key) until their tokens expire. There is no `kid` header and no token issuer.
 
 * `POST /api/v1/loans`: Ingests loan origination applications, validates applicant UUIDs and dynamic loan tier properties, persists the loan, creates an outbox event, and appends an `ApplicationSubmitted` record to the SHA-256 ledger.
 * `POST /api/v1/transactions`: Ingests financial transactions, evaluates real-time sliding-window velocity thresholds, and dual-writes transaction state with outbox events.

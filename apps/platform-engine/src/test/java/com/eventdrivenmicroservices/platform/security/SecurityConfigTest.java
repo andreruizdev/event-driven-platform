@@ -12,6 +12,7 @@ import java.time.Instant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -44,6 +45,25 @@ class SecurityConfigTest {
         long now = Instant.now().getEpochSecond();
 
         assertTrue(securityConfig.validateJwtToken(token(SECRET, "HS256", "{\"exp\":" + (now - 5) + "}"), SECRET));
+    }
+
+    @Test
+    void acceptsPreviousSecretsDuringRotationAndRejectsRetiredOnes() throws Exception {
+        long exp = Instant.now().getEpochSecond() + 3600;
+        String claims = "{\"sub\":\"sensor-1\",\"exp\":" + exp + "}";
+        String oldToken = token("old-secret", "HS256", claims);
+        String newToken = token(SECRET, "HS256", claims);
+        ReflectionTestUtils.setField(securityConfig, "jwtSecretKey", SECRET);
+
+        assertNull(securityConfig.authenticatedSubjectWithRotation(oldToken, Instant.now()));
+
+        ReflectionTestUtils.setField(securityConfig, "jwtPreviousSecretKeys", "older-secret, old-secret");
+        assertEquals("sensor-1", securityConfig.authenticatedSubjectWithRotation(oldToken, Instant.now()));
+        assertEquals("sensor-1", securityConfig.authenticatedSubjectWithRotation(newToken, Instant.now()));
+        assertNull(securityConfig.authenticatedSubjectWithRotation(token("unknown", "HS256", claims), Instant.now()));
+
+        ReflectionTestUtils.setField(securityConfig, "jwtPreviousSecretKeys", null);
+        assertNull(securityConfig.authenticatedSubjectWithRotation(oldToken, Instant.now()));
     }
 
     @Test

@@ -76,6 +76,12 @@ spec:
             secretKeyRef:
               name: eventdrivenmicroservices-secrets
               key: JWT_SECRET_KEY
+        - name: JWT_SECRET_KEY_PREVIOUS
+          valueFrom:
+            secretKeyRef:
+              name: eventdrivenmicroservices-secrets
+              key: JWT_SECRET_KEY_PREVIOUS
+              optional: true
         livenessProbe:
           httpGet:
             path: /actuator/health/liveness

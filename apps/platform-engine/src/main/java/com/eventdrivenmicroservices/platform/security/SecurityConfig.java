@@ -42,6 +42,10 @@ public class SecurityConfig {
     @Value("${JWT_SECRET_KEY:#{null}}")
     private String jwtSecretKey;
 
+    /** Comma-separated earlier secrets still accepted for verification while tokens signed with them expire. */
+    @Value("${JWT_SECRET_KEY_PREVIOUS:#{null}}")
+    private String jwtPreviousSecretKeys;
+
     @Value("${JWT_ISSUER:#{null}}")
     private String jwtIssuer;
 
@@ -92,7 +96,7 @@ public class SecurityConfig {
         return (ServerWebExchange exchange, WebFilterChain chain) -> {
             String authHeader = exchange.getRequest().getHeaders().getFirst("Authorization");
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
-                String subject = authenticatedSubject(authHeader.substring(7), jwtSecretKey, Instant.now());
+                String subject = authenticatedSubjectWithRotation(authHeader.substring(7), Instant.now());
                 if (subject != null) {
                     // Bearer tokens identify edge nodes only; they never carry operator/ADMIN authorities.
                     UsernamePasswordAuthenticationToken authentication =
@@ -103,6 +107,17 @@ public class SecurityConfig {
             }
             return chain.filter(exchange);
         };
+    }
+
+    /** Verifies against the current secret first, then each previous secret, so a key can be rotated without an outage. */
+    String authenticatedSubjectWithRotation(String token, Instant now) {
+        String subject = authenticatedSubject(token, jwtSecretKey, now);
+        if (subject != null || !hasText(jwtPreviousSecretKeys)) return subject;
+        for (String previous : jwtPreviousSecretKeys.split(",")) {
+            subject = authenticatedSubject(token, previous.trim(), now);
+            if (subject != null) return subject;
+        }
+        return null;
     }
 
     boolean validateJwtToken(String token, String secret) {
