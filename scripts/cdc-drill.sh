@@ -67,7 +67,23 @@ second="$(cat /proc/sys/kernel/random/uuid)"
 insert_event "$second"
 wait_for "second row marked processed after restart" is_processed "$second"
 
-for id in "$first" "$second"; do
+# Connect pod loss: kill the pod, write while it is down, expect replay from the stored offsets.
+kubectl delete pod -n "$NS" -l app=eventdrivenmicroservices-debezium --wait=false >/dev/null
+third="$(cat /proc/sys/kernel/random/uuid)"
+insert_event "$third"
+kubectl rollout status -n "$NS" deploy/eventdrivenmicroservices-debezium --timeout="${TIMEOUT}s"
+wait_for "connector RUNNING after Connect pod loss" connector_running
+wait_for "third row (written during Connect outage) marked processed" is_processed "$third"
+
+# Bridge crash: kill the platform pod right after the insert. Delivery is at-least-once, so the
+# row must end up processed with at least one canonical message (a replay may duplicate it).
+fourth="$(cat /proc/sys/kernel/random/uuid)"
+insert_event "$fourth"
+kubectl delete pod -n "$NS" -l app=platform-engine --wait=false >/dev/null
+kubectl rollout status -n "$NS" deploy/platform-engine --timeout="${TIMEOUT}s"
+wait_for "fourth row marked processed after bridge pod loss" is_processed "$fourth"
+
+for id in "$first" "$second" "$third"; do
   count="$(canonical_count "$id")"
   if [ "$count" != "1" ]; then
     echo "FAIL: expected exactly one canonical message for ${id}, found ${count}" >&2
@@ -75,5 +91,12 @@ for id in "$first" "$second"; do
   fi
   echo "OK: exactly one canonical message for ${id}"
 done
+
+fourth_count="$(canonical_count "$fourth")"
+if [ "$fourth_count" -lt 1 ]; then
+  echo "FAIL: no canonical message for ${fourth} after bridge crash" >&2
+  exit 1
+fi
+echo "OK: ${fourth_count} canonical message(s) for ${fourth} after bridge crash (at-least-once)"
 
 echo "CDC drill passed"
