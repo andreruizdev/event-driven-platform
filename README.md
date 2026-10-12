@@ -90,7 +90,7 @@ Run the single entry-point script to validate the toolchain, run Gradle tests, p
    ```bash
    kubectl port-forward svc/platform-engine 8080:8080
    ```
-   Navigate to `http://localhost:8080/` in your browser. Log in with `admin` / `local-dev-password` to use the interactive loan, transaction, telemetry, outbox, and ledger control room.
+   Navigate to `http://localhost:8080/` in your browser. Log in with `admin` and the local password (`local-dev-password` unless you set `SPRING_SECURITY_USER_PASSWORD`; the form no longer pre-fills it) to use the interactive loan, transaction, telemetry, outbox, and ledger control room.
 
 2. **Port-Forward the Grafana Observability Dashboard**:
    ```bash
