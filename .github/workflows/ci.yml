@@ -230,6 +230,38 @@ jobs:
           BASE_URL=http://localhost:18082 \
           ADMIN_PASSWORD=ci-admin-password ./scripts/demo.sh
 
+      - name: Setup Java 21 for dashboard rendering check
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Render Grafana dashboard in a browser
+        working-directory: ./apps/platform-engine
+        env:
+          GRAFANA_URL: http://127.0.0.1:13000
+          GRAFANA_ADMIN_PASSWORD: test
+          GRAFANA_SCREENSHOT_DIR: ${{ github.workspace }}/grafana-render
+        run: |
+          ./gradlew installPlaywrightChromium
+          kubectl -n event-driven-lab port-forward deploy/eventdrivenmicroservices-grafana 13000:3000 >/dev/null 2>&1 &
+          PF=$!
+          trap 'kill $PF' EXIT
+          for _ in $(seq 1 30); do
+            curl -fs -u admin:test http://127.0.0.1:13000/api/health >/dev/null && break
+            sleep 2
+          done
+          ./gradlew test --tests '*GrafanaDashboardRenderingTest'
+
+      - name: Upload Grafana rendering evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: grafana-dashboard-render
+          path: grafana-render/
+          if-no-files-found: warn
+
       - name: Dump diagnostics on failure
         if: failure()
         run: |
