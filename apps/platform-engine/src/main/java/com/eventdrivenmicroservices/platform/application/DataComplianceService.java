@@ -1,5 +1,6 @@
 package com.eventdrivenmicroservices.platform.application;
 
+import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyAlertOutboxRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEventRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.TelemetryEventRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,7 @@ public class DataComplianceService {
 
     private final TelemetryEventRepository telemetryEventRepository;
     private final OutboxEventRepository outboxEventRepository;
+    private final AnomalyAlertOutboxRepository alertOutboxRepository;
     private final DatabaseClient databaseClient;
 
     @Value("${eventdrivenmicroservices.compliance.retention-days:7}")
@@ -47,9 +49,11 @@ public class DataComplianceService {
     @Autowired
     public DataComplianceService(TelemetryEventRepository telemetryEventRepository,
                                  OutboxEventRepository outboxEventRepository,
+                                 AnomalyAlertOutboxRepository alertOutboxRepository,
                                  @Autowired(required = false) DatabaseClient databaseClient) {
         this.telemetryEventRepository = telemetryEventRepository;
         this.outboxEventRepository = outboxEventRepository;
+        this.alertOutboxRepository = alertOutboxRepository;
         this.databaseClient = databaseClient;
     }
 
@@ -78,7 +82,13 @@ public class DataComplianceService {
                     .then()
                     .onErrorResume(e -> Mono.empty());
 
-            return partitions.then(telemetry).then(outbox);
+            Mono<Void> alerts = alertOutboxRepository.deletePublishedBefore(outboxCutoff)
+                    .doOnSuccess(count -> log.info("[ALERT OUTBOX PURGE] Purged {} published alert outbox rows.", count))
+                    .doOnError(e -> log.error("[ALERT OUTBOX PURGE] Error purging published alert outbox rows", e))
+                    .then()
+                    .onErrorResume(e -> Mono.empty());
+
+            return partitions.then(telemetry).then(outbox).then(alerts);
         });
     }
 

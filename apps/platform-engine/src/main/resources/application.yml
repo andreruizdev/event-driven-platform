@@ -1,4 +1,6 @@
 spring:
+  reactor:
+    context-propagation: auto
   application:
     name: platform-engine
   kafka:

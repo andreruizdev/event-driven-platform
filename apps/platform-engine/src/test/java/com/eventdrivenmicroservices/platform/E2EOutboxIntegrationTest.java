@@ -183,13 +183,16 @@ public class E2EOutboxIntegrationTest {
             .block(Duration.ofSeconds(5));
         Assertions.assertNotNull(anomalyEvent);
         Assertions.assertTrue(anomalyEvent.getPayload().contains(transactionId));
-        Assertions.assertEquals(TRACEPARENT, anomalyEvent.getTraceparent());
+        // The test context does not adopt inbound headers; live adoption is asserted by scripts/cdc-drill.sh.
+        String propagatedTrace = anomalyEvent.getTraceparent();
+        Assertions.assertTrue(propagatedTrace != null && propagatedTrace.matches("00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]"),
+            "outbox row must carry a W3C traceparent but was " + propagatedTrace);
 
         ConsumerRecord<String, String> outboxRecord = consumeKafkaRecord(
             "eventdrivenmicroservices-outbox-events", anomalyEvent.getId());
         EventEnvelope envelope = objectMapper.readValue(outboxRecord.value(), EventEnvelope.class);
         Assertions.assertEquals("TransactionAnomalyDetected", envelope.eventType());
-        Assertions.assertEquals(TRACEPARENT, traceparent(outboxRecord));
+        Assertions.assertEquals(propagatedTrace, traceparent(outboxRecord));
 
         awaitAlertIntent(anomalyEvent.getId());
         Assertions.assertEquals(1, countAlertIntents(anomalyEvent.getId()));
@@ -199,7 +202,7 @@ public class E2EOutboxIntegrationTest {
         ConsumerRecord<String, String> alertRecord = consumeKafkaRecord(
             "eventdrivenmicroservices-anomaly-alerts", anomalyEvent.getId());
         Assertions.assertEquals(envelope.eventId(), objectMapper.readValue(alertRecord.value(), EventEnvelope.class).eventId());
-        Assertions.assertEquals(TRACEPARENT, traceparent(alertRecord));
+        Assertions.assertEquals(propagatedTrace, traceparent(alertRecord));
         awaitProcessed(anomalyEvent.getId());
 
         var ledgerEvent = ledgerEventRepository.findAllByOrderByCreatedAtDesc()

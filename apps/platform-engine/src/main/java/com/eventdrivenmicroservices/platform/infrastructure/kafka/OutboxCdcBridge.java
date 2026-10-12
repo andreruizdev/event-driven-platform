@@ -3,12 +3,14 @@ package com.eventdrivenmicroservices.platform.infrastructure.kafka;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.eventdrivenmicroservices.platform.infrastructure.observability.OutboxMetrics;
+import com.eventdrivenmicroservices.platform.infrastructure.observability.TraceSupport;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.EventEnvelope;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEventRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
@@ -33,15 +35,26 @@ public class OutboxCdcBridge {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final OutboxEventRepository outboxRepository;
     private final OutboxMetrics metrics;
+    private final TraceSupport traceSupport;
 
     public OutboxCdcBridge(ObjectMapper objectMapper,
                            KafkaTemplate<String, String> kafkaTemplate,
                            OutboxEventRepository outboxRepository,
                            OutboxMetrics metrics) {
+        this(objectMapper, kafkaTemplate, outboxRepository, metrics, TraceSupport.noop());
+    }
+
+    @Autowired
+    public OutboxCdcBridge(ObjectMapper objectMapper,
+                           KafkaTemplate<String, String> kafkaTemplate,
+                           OutboxEventRepository outboxRepository,
+                           OutboxMetrics metrics,
+                           TraceSupport traceSupport) {
         this.objectMapper = objectMapper;
         this.kafkaTemplate = kafkaTemplate;
         this.outboxRepository = outboxRepository;
         this.metrics = metrics;
+        this.traceSupport = traceSupport;
     }
 
     @KafkaListener(
@@ -83,14 +96,16 @@ public class OutboxCdcBridge {
             output.headers().add("traceparent", traceparent.getBytes(StandardCharsets.UTF_8));
         }
 
-        Instant publishStarted = Instant.now();
-        kafkaTemplate.send(output).get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        metrics.recordPublishDuration(Duration.between(publishStarted, Instant.now()));
-        Integer rowsUpdated = outboxRepository.markAsProcessed(eventId, Instant.now())
-                .block(DATABASE_TIMEOUT);
-        if (rowsUpdated == null || rowsUpdated != 1) {
-            throw new IllegalStateException("Published CDC outbox event could not be marked as processed: " + eventId);
-        }
+        traceSupport.runInSpan("outbox.cdc.publish", traceparent, "outbox.event.id", eventId.toString(), () -> {
+            Instant publishStarted = Instant.now();
+            kafkaTemplate.send(output).get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            metrics.recordPublishDuration(Duration.between(publishStarted, Instant.now()));
+            Integer rowsUpdated = outboxRepository.markAsProcessed(eventId, Instant.now())
+                    .block(DATABASE_TIMEOUT);
+            if (rowsUpdated == null || rowsUpdated != 1) {
+                throw new IllegalStateException("Published CDC outbox event could not be marked as processed: " + eventId);
+            }
+        });
         metrics.recordPublishSuccess();
         log.debug("Published CDC outbox event {} to canonical topic", eventId);
     }

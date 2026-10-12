@@ -3,11 +3,13 @@ package com.eventdrivenmicroservices.platform.infrastructure.kafka;
 import static com.eventdrivenmicroservices.platform.config.LogSanitizer.safe;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.eventdrivenmicroservices.platform.infrastructure.observability.TraceSupport;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.EventEnvelope;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
@@ -36,13 +38,23 @@ public class AnomalyEventListener {
     private final ObjectMapper objectMapper;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final AnomalyAlertOutboxRepository alertOutboxRepository;
+    private final TraceSupport traceSupport;
 
     public AnomalyEventListener(ObjectMapper objectMapper,
                                 KafkaTemplate<String, String> kafkaTemplate,
                                 AnomalyAlertOutboxRepository alertOutboxRepository) {
+        this(objectMapper, kafkaTemplate, alertOutboxRepository, TraceSupport.noop());
+    }
+
+    @Autowired
+    public AnomalyEventListener(ObjectMapper objectMapper,
+                                KafkaTemplate<String, String> kafkaTemplate,
+                                AnomalyAlertOutboxRepository alertOutboxRepository,
+                                TraceSupport traceSupport) {
         this.objectMapper = objectMapper;
         this.kafkaTemplate = kafkaTemplate;
         this.alertOutboxRepository = alertOutboxRepository;
+        this.traceSupport = traceSupport;
     }
 
     @KafkaListener(topics = "eventdrivenmicroservices-outbox-events", groupId = "eventdrivenmicroservices-anomaly-cep-group")
@@ -55,14 +67,20 @@ public class AnomalyEventListener {
             publishDeadLetter(record, exception);
             return;
         }
-        if (!ANOMALY_EVENT_TYPES.contains(envelope.eventType())) {
-            return;
-        }
-
         Header traceparentHeader = record.headers().lastHeader("traceparent");
         String traceparent = traceparentHeader == null
                 ? envelope.traceparent()
                 : new String(traceparentHeader.value(), StandardCharsets.UTF_8);
+
+        final EventEnvelope accepted = envelope;
+        traceSupport.runInSpan("outbox.consume", traceparent, "event.type", envelope.eventType(),
+                () -> handleAccepted(accepted, traceparent));
+    }
+
+    private void handleAccepted(EventEnvelope envelope, String traceparent) throws Exception {
+        if (!ANOMALY_EVENT_TYPES.contains(envelope.eventType())) {
+            return;
+        }
 
         String value = objectMapper.writeValueAsString(envelope);
         try {

@@ -62,4 +62,8 @@ public interface AnomalyAlertOutboxRepository
     Mono<Integer> recordFailure(@Param("eventId") UUID eventId,
                                 @Param("lastError") String lastError,
                                 @Param("nextAttemptAt") Instant nextAttemptAt);
+
+    @Modifying
+    @Query("DELETE FROM anomaly_alert_outbox WHERE published_at IS NOT NULL AND published_at < :cutoffDate")
+    Mono<Integer> deletePublishedBefore(@Param("cutoffDate") Instant cutoffDate);
 }

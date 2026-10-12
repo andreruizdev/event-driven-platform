@@ -5,6 +5,7 @@ import com.eventdrivenmicroservices.platform.anomaly.StreamingAnomalyDetector;
 import com.eventdrivenmicroservices.platform.model.FinancialTransaction;
 import com.eventdrivenmicroservices.platform.model.FinancialTransactionPayload;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.FinancialTransactionRepository;
+import com.eventdrivenmicroservices.platform.infrastructure.observability.TraceSupport;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEvent;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEventRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +27,7 @@ public class TransactionProcessingServiceImpl implements TransactionProcessingSe
     private final LedgerService ledgerService;
     private final StreamingAnomalyDetector anomalyDetector;
     private final ObjectMapper objectMapper;
+    private TraceSupport traceSupport = TraceSupport.noop();
 
     @Autowired
     public TransactionProcessingServiceImpl(FinancialTransactionRepository repository,
@@ -38,6 +40,11 @@ public class TransactionProcessingServiceImpl implements TransactionProcessingSe
         this.ledgerService = ledgerService;
         this.anomalyDetector = anomalyDetector;
         this.objectMapper = objectMapper;
+    }
+
+    @Autowired(required = false)
+    void setTraceSupport(TraceSupport traceSupport) {
+        this.traceSupport = traceSupport;
     }
 
     @Override
@@ -77,18 +84,20 @@ public class TransactionProcessingServiceImpl implements TransactionProcessingSe
                         outboxEvent.setAggregateId(savedEvent.getId().toString());
                         outboxEvent.setEventType(eventType);
                         outboxEvent.setPayload(payloadStr);
-                        outboxEvent.setTraceparent(traceparent);
                         outboxEvent.setCreatedAt(Instant.now());
 
-                        Mono<OutboxEvent> saveOutbox = outboxRepository.save(outboxEvent);
-
-                        if (anomalyScore.isAnomaly()) {
-                            log.warn("[ANOMALY REACTION] Financial velocity anomaly flagged for merchant: {}", safe(trackerKey));
-                            return ledgerService.appendEvent("ANOMALY_FLAGGED", payloadStr)
-                                    .then(saveOutbox);
-                        }
-
-                        return saveOutbox;
+                        return traceSupport.currentTraceparent().defaultIfEmpty(traceparent == null ? "" : traceparent)
+                                .flatMap(currentTrace -> {
+                                    outboxEvent.setTraceparent(currentTrace.isEmpty() ? null : currentTrace);
+                                    Mono<OutboxEvent> saveOutbox = outboxRepository.save(outboxEvent);
+                                    if (anomalyScore.isAnomaly()) {
+                                        log.warn("[ANOMALY REACTION] Financial velocity anomaly flagged for merchant: {}", safe(trackerKey));
+                                        return traceSupport.traced("ledger.append",
+                                                ledgerService.appendEvent("ANOMALY_FLAGGED", payloadStr))
+                                                .then(saveOutbox);
+                                    }
+                                    return saveOutbox;
+                                });
                     }).thenReturn(savedEvent);
             })
             .doOnError(e -> log.error("Error processing transaction async: {}", e.getMessage(), e))

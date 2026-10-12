@@ -144,6 +144,29 @@ if [ "${slot_count%.*}" -lt 1 ]; then
 fi
 echo "OK: replication slot gauge reports ${slot_count} slot(s)"
 
+# One HTTP request must produce a single Tempo trace spanning HTTP, ledger, CDC publish and Kafka consume.
+TRACE_ID="$(openssl rand -hex 16)"
+kubectl -n "$NS" port-forward deploy/platform-engine 18080:8080 >/dev/null 2>&1 &
+PF_APP=$!
+kubectl -n "$NS" port-forward deploy/eventdrivenmicroservices-tempo 13200:3200 >/dev/null 2>&1 &
+PF_TEMPO=$!
+trap 'kill $PF_APP $PF_TEMPO 2>/dev/null || true' EXIT
+sleep 5
+ADMIN_PASSWORD="$(kubectl -n "$NS" get deploy platform-engine -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SPRING_SECURITY_USER_PASSWORD")].value}' 2>/dev/null || true)"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-local-dev-password}"
+curl -fsS -o /dev/null -u "admin:${ADMIN_PASSWORD}" -H "Content-Type: application/json" \
+  -H "traceparent: 00-${TRACE_ID}-b7ad6b7169203331-01" \
+  -d '{"transactionId":"trace-drill","amount":15000.00,"currency":"USD","merchantId":"trace-drill-merchant","settlementStatus":"PENDING"}' \
+  http://localhost:18080/api/v1/transactions
+trace_complete() {
+  local body
+  body="$(curl -fsS "http://localhost:13200/api/traces/${TRACE_ID}" 2>/dev/null)" || return 1
+  for span in 'http post /api/v1/transactions' 'ledger.append' 'outbox.cdc.publish' 'outbox.consume'; do
+    echo "$body" | grep -q "\"name\":\"${span}\"" || return 1
+  done
+}
+wait_for "single Tempo trace ${TRACE_ID} spans HTTP, ledger, CDC publish and consume" trace_complete
+
 # Observability pods have no probes, so a crash loop would otherwise look healthy.
 for app in prometheus grafana otel-collector tempo loki; do
   restarts="$(kubectl -n "$NS" get pods -l "app=eventdrivenmicroservices-${app}" \

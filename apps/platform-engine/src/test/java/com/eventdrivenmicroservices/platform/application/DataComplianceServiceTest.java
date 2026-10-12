@@ -1,5 +1,6 @@
 package com.eventdrivenmicroservices.platform.application;
 
+import com.eventdrivenmicroservices.platform.infrastructure.kafka.AnomalyAlertOutboxRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.outbox.OutboxEventRepository;
 import com.eventdrivenmicroservices.platform.infrastructure.postgres.TelemetryEventRepository;
 import org.junit.jupiter.api.Test;
@@ -68,13 +69,16 @@ class DataComplianceServiceTest {
     void jobRunsOutboxPurgeEvenWhenTelemetryRetentionFails() {
         TelemetryEventRepository telemetry = mock(TelemetryEventRepository.class);
         OutboxEventRepository outbox = mock(OutboxEventRepository.class);
+        AnomalyAlertOutboxRepository alerts = mock(AnomalyAlertOutboxRepository.class);
+        when(alerts.deletePublishedBefore(any(Instant.class))).thenReturn(Mono.just(1));
         when(telemetry.deleteOldTelemetryEvents(any(OffsetDateTime.class)))
                 .thenReturn(Mono.error(new IllegalStateException("db down")));
         when(outbox.deleteProcessedOldEvents(any(Instant.class))).thenReturn(Mono.just(2));
 
-        StepVerifier.create(new DataComplianceService(telemetry, outbox, null).executeDataPurge())
+        StepVerifier.create(new DataComplianceService(telemetry, outbox, alerts, null).executeDataPurge())
                 .verifyComplete();
 
         verify(outbox).deleteProcessedOldEvents(any(Instant.class));
+        verify(alerts).deletePublishedBefore(any(Instant.class));
     }
 }
