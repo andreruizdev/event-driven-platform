@@ -137,6 +137,7 @@ jobs:
             --from-literal=DEBEZIUM_PASSWORD=test-debezium \
             --from-literal=JWT_SECRET_KEY=test-secret-for-ci-only \
             --from-literal=GF_SECURITY_ADMIN_PASSWORD=test \
+            --from-literal=ADMIN_PASSWORD=ci-admin-password \
             --namespace event-driven-lab \
             --dry-run=client -o yaml | kubectl apply -f -
 
@@ -187,6 +188,7 @@ jobs:
             --from-literal=DEBEZIUM_PASSWORD=test-debezium \
             --from-literal=JWT_SECRET_KEY=test-secret-for-ci-only \
             --from-literal=GF_SECURITY_ADMIN_PASSWORD=test \
+            --from-literal=ADMIN_PASSWORD=ci-admin-password \
             --namespace event-driven-lab \
             --dry-run=client -o yaml | kubectl apply -f -
           helm upgrade --install event-driven-lab ./deploy/helm/event-driven-lab \

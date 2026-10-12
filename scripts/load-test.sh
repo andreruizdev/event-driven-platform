@@ -25,7 +25,7 @@ kubectl -n "$NS" port-forward deploy/platform-engine 18081:8080 >/dev/null 2>&1 
 PF=$!
 sleep 5
 AUTH_MODE="${LOAD_AUTH:-bearer}"
-PASSWORD="${SPRING_SECURITY_USER_PASSWORD:-local-dev-password}"
+PASSWORD="${ADMIN_PASSWORD:-$(kubectl -n "$NS" get secret eventdrivenmicroservices-secrets -o jsonpath='{.data.ADMIN_PASSWORD}' 2>/dev/null | base64 -d 2>/dev/null || true)}"
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 if [ "$AUTH_MODE" = "bearer" ]; then
   JWT_SECRET="$(kubectl -n "$NS" get secret eventdrivenmicroservices-secrets -o jsonpath='{.data.JWT_SECRET_KEY}' | base64 -d)"

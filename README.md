@@ -124,7 +124,7 @@ Run the single entry-point script to validate the toolchain, run Gradle tests, p
 - The Helm PostgreSQL workload uses a PersistentVolumeClaim (durability drill passes in CI) but is a single replica with no backups or HA. The chart is a local lab deployment, not a production-ready data platform.
 - The Docker-backed E2E tests need a Docker daemon compatible with the pinned Testcontainers. If your daemon requires a newer API version, set `api.version=1.44` in `~/.docker-java.properties`; otherwise they are skipped locally and CI runs them.
 - Trace propagation (HTTP, ledger, outbox row, CDC bridge, consumer) is asserted in Tempo by the CDC drill; the control-room trace link is not yet implemented.
-- `local-dev-password` is a local fallback credential only. Provide runtime secrets explicitly and do not reuse these credentials outside a disposable development environment.
+- `local-dev-password` is a local fallback credential for non-Kubernetes runs only. The `k8s` profile (Helm) now refuses to start if the admin or database password is blank or the fallback; the chart reads the admin password from secret key `ADMIN_PASSWORD`. `scripts/start-all.*` still writes a different secret key set and is not aligned with the chart.
 
 ## Five-Minute Demo
 

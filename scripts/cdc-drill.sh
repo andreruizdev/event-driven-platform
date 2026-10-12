@@ -152,8 +152,7 @@ kubectl -n "$NS" port-forward deploy/eventdrivenmicroservices-tempo 13200:3200 >
 PF_TEMPO=$!
 trap 'kill $PF_APP $PF_TEMPO 2>/dev/null || true' EXIT
 sleep 5
-ADMIN_PASSWORD="$(kubectl -n "$NS" get deploy platform-engine -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="SPRING_SECURITY_USER_PASSWORD")].value}' 2>/dev/null || true)"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-local-dev-password}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(kubectl -n "$NS" get secret eventdrivenmicroservices-secrets -o jsonpath='{.data.ADMIN_PASSWORD}' | base64 -d)}"
 curl -fsS -o /dev/null -u "admin:${ADMIN_PASSWORD}" -H "Content-Type: application/json" \
   -H "traceparent: 00-${TRACE_ID}-b7ad6b7169203331-01" \
   -d '{"transactionId":"trace-drill","amount":15000.00,"currency":"USD","merchantId":"trace-drill-merchant","settlementStatus":"PENDING"}' \
