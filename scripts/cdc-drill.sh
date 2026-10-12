@@ -179,6 +179,34 @@ if [ "$fourth_count" -lt 1 ]; then
 fi
 echo "OK: ${fourth_count} canonical message(s) for ${fourth} after bridge crash (at-least-once)"
 
+# DLT operations: a malformed record must be dead-lettered with original coordinates, inspection must not
+# print its payload, replay must be refused without confirmation, and a confirmed replay must reach the topic.
+poison="poison-$(cat /proc/sys/kernel/random/uuid)"
+dlt_count() { "$(dirname "$0")/dlt-ops.sh" inspect | grep -c 'x-original-topic' || true; }
+dlt_before="$(dlt_count)"
+echo "$poison" | kubectl exec -i -n "$NS" deploy/eventdrivenmicroservices-kafka -- \
+  kafka-console-producer --bootstrap-server localhost:9092 --topic "$TOPIC" >/dev/null
+dlt_grew() { [ "$(dlt_count)" -gt "$dlt_before" ]; }
+wait_for "malformed record dead-lettered" dlt_grew
+dlt_listing="$("$(dirname "$0")/dlt-ops.sh" inspect)"
+if echo "$dlt_listing" | grep -q "$poison"; then
+  echo "FAIL: DLT inspection exposed a payload" >&2
+  exit 1
+fi
+echo "$dlt_listing" | grep -q "x-original-topic:${TOPIC}" || { echo "FAIL: DLT record lacks original topic" >&2; exit 1; }
+echo "OK: DLT inspection shows original coordinates without payloads"
+dlt_last="$(echo "$dlt_listing" | grep 'x-original-topic' | tail -1)"
+dlt_partition="$(echo "$dlt_last" | grep -oE 'Partition:[0-9]+' | cut -d: -f2)"
+dlt_offset="$(echo "$dlt_last" | grep -oE 'Offset:[0-9]+' | cut -d: -f2)"
+if "$(dirname "$0")/dlt-ops.sh" replay "$dlt_partition" "$dlt_offset" >/dev/null 2>&1; then
+  echo "FAIL: replay ran without CONFIRM_REPLAY=true" >&2
+  exit 1
+fi
+echo "OK: replay refused without confirmation"
+dlt_before="$(dlt_count)"
+CONFIRM_REPLAY=true "$(dirname "$0")/dlt-ops.sh" replay "$dlt_partition" "$dlt_offset"
+wait_for "replayed malformed record dead-lettered again (replay reached the canonical topic)" dlt_grew
+
 # Latency: sequential single-event inserts; latency is processed_at - created_at on the same host clock.
 LATENCY_SAMPLES="${CDC_LATENCY_SAMPLES:-20}"
 LATENCY_P95_BUDGET_MS="${CDC_LATENCY_P95_BUDGET_MS:-500}"
