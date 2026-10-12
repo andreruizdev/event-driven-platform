@@ -137,7 +137,7 @@ This is the ordered implementation plan. Complete each exit gate before advancin
 - [ ] Validate Grafana queries against live metrics; add connector/replication lag, consumer lag, event latency, failure, and recovery panels only for emitted signals.
 - [ ] Make the control room a workflow timeline keyed by event ID/correlation ID: accepted, persisted, published, anomaly/alert, ledger, retries, and trace link. Show pending/failure/loading/empty states without exposing sensitive payloads.
 - [ ] Remove the duplicate root/static UI assets or establish one tested canonical resource source; add browser tests for the loan and anomaly workflows.
-- [x] Turn `scripts/demo.sh` into an assertion-based smoke test for the same visible outcomes, not just a request generator.
+- [x] Turn `scripts/demo.sh` into an assertion-based smoke test for the same visible outcomes, not just a request generator. Verified by CI run 38199559941; the same run scrapes `kafka_consumer_fetch_manager_records_lag_max` in the drill.
 
 **Exit gate:** A clean Kind deployment can run the demo and let an operator follow the same event through UI evidence, Kafka/ledger state, metrics, and Tempo.
 
