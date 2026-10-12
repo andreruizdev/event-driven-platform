@@ -57,7 +57,7 @@ The HTTP layer uses Spring WebFlux and is protected by HTTP Basic and a custom H
 * `POST /api/v1/telemetry`: High-throughput telemetry ingestion evaluating rolling Z-score outliers ($Z > 3.0$).
 * `GET /api/v1/ledger`: Retrieves chronological ledger event history with hash proofs.
 * `GET /api/v1/ledger/latest-hash`: Exposes the latest cryptographic head of the SHA-256 chain.
-* `GET /api/v1/ledger/verify`: Recomputes the full chain in append order and returns `valid`, `eventsChecked`, and the first invalid event ID and reason, if any.
+* `GET /api/v1/ledger/verify`: Recomputes the full chain in append order and returns `valid`, `eventsChecked`, and the first invalid event ID and reason, if any. Optional `?recent=N` limits it to the latest N events (response `scope`). `ConnectorStateMonitor` polls Kafka Connect and exposes connector/task gauges that drive the `DebeziumConnectorNotRunning` and `DebeziumTaskFailed` alerts.
 * `GET /api/v1/outbox/status`: Returns current outbox backlog depth, oldest unprocessed record timestamp, and queue age.
 * `GET /`: Interactive web control room serving static WebFlux resources for operators and live demos.
 
@@ -98,7 +98,7 @@ The ledger stores hash-linked records for loan submissions and selected anomaly 
   $$\text{current\_hash} = \text{SHA-256}(\text{previous\_hash} + \text{transaction\_type} + \text{payload})$$
 * **Serialized appends:** `appendToLedger` takes a transaction-scoped PostgreSQL advisory lock before reading the head, so concurrent appends (including across replicas) form one chain. A unique `seq` identity column (migration `V5`) defines chain order; `created_at` is not used for ordering.
 * **Append-only enforcement:** database triggers reject `UPDATE`, `DELETE`, and `TRUNCATE` on `ledger_events`. A unique index on `previous_hash` additionally prevents forks. A database superuser can still disable triggers, so this deters application-level mutation rather than a privileged attacker.
-* **Verification:** `GET /api/v1/ledger/verify` recomputes every hash and link in append order. It reads the whole table, so it needs pagination or checkpoints at scale, and it detects tampering only after the fact. Retention of ledger rows must be designed around the append-only triggers.
+* **Verification:** `GET /api/v1/ledger/verify` recomputes every hash and link in append order. It streams the whole table (no checkpoints yet); `?recent=N` verifies only the latest N events and cannot see earlier tampering, and `GET /api/v1/ledger` is bounded by `?limit=`. It detects tampering only after the fact. Retention of ledger rows must be designed around the append-only triggers.
 
 ---
 
