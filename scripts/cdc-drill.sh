@@ -144,4 +144,16 @@ if [ "${slot_count%.*}" -lt 1 ]; then
 fi
 echo "OK: replication slot gauge reports ${slot_count} slot(s)"
 
+# Observability pods have no probes, so a crash loop would otherwise look healthy.
+for app in prometheus grafana otel-collector tempo loki; do
+  restarts="$(kubectl -n "$NS" get pods -l "app=eventdrivenmicroservices-${app}" \
+    -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}')"
+  phase="$(kubectl -n "$NS" get pods -l "app=eventdrivenmicroservices-${app}" -o jsonpath='{.items[0].status.phase}')"
+  if [ "$phase" != "Running" ] || [ "${restarts// /}" != "0" ]; then
+    echo "FAIL: ${app} phase=${phase} restartCount='${restarts}'" >&2
+    exit 1
+  fi
+done
+echo "OK: observability pods Running with 0 restarts"
+
 echo "CDC drill passed"

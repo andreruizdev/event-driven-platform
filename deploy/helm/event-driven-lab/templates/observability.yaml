@@ -87,8 +87,13 @@ spec:
     spec:
       containers:
       - name: prometheus
-        image: prom/prometheus:latest
+        image: prom/prometheus:v3.15.0
         securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          readOnlyRootFilesystem: true
+          seccompProfile:
+            type: RuntimeDefault
           allowPrivilegeEscalation: false
           capabilities:
             drop:
@@ -102,10 +107,14 @@ spec:
         - name: config-volume
           mountPath: /etc/prometheus/outbox-alerts.yml
           subPath: outbox-alerts.yml
+        - name: prometheus-data
+          mountPath: /prometheus
       volumes:
       - name: config-volume
         configMap:
           name: eventdrivenmicroservices-prometheus-config
+      - name: prometheus-data
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -254,8 +263,13 @@ spec:
     spec:
       containers:
       - name: grafana
-        image: grafana/grafana:latest
+        image: grafana/grafana:13.2.3
         securityContext:
+          runAsNonRoot: true
+          runAsUser: 472
+          readOnlyRootFilesystem: true
+          seccompProfile:
+            type: RuntimeDefault
           allowPrivilegeEscalation: false
           capabilities:
             drop:
@@ -268,14 +282,24 @@ spec:
             secretKeyRef:
               name: eventdrivenmicroservices-secrets
               key: GF_SECURITY_ADMIN_PASSWORD
+        - name: GF_PLUGINS_PREINSTALL_DISABLED
+          value: "true"
         volumeMounts:
         - name: grafana-datasources
           mountPath: /etc/grafana/provisioning/datasources
         - name: grafana-dashboards-provider
           mountPath: /etc/grafana/provisioning/dashboards
+        - name: grafana-data
+          mountPath: /var/lib/grafana
         - name: grafana-dashboard-eventdrivenmicroservices
           mountPath: /var/lib/grafana/dashboards
+        - name: grafana-tmp
+          mountPath: /tmp
       volumes:
+      - name: grafana-data
+        emptyDir: {}
+      - name: grafana-tmp
+        emptyDir: {}
       - name: grafana-datasources
         configMap:
           name: grafana-datasources
@@ -355,8 +379,13 @@ spec:
     spec:
       containers:
       - name: otel-collector
-        image: otel/opentelemetry-collector-contrib:latest
+        image: otel/opentelemetry-collector-contrib:0.162.0
         securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          readOnlyRootFilesystem: true
+          seccompProfile:
+            type: RuntimeDefault
           allowPrivilegeEscalation: false
           capabilities:
             drop:
@@ -434,8 +463,13 @@ spec:
     spec:
       containers:
       - name: tempo
-        image: grafana/tempo:latest
+        image: grafana/tempo:3.0.0
         securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          readOnlyRootFilesystem: true
+          seccompProfile:
+            type: RuntimeDefault
           allowPrivilegeEscalation: false
           capabilities:
             drop:
@@ -448,7 +482,15 @@ spec:
         - name: tempo-config-vol
           mountPath: /etc/tempo.yaml
           subPath: tempo.yaml
+        - name: tempo-data
+          mountPath: /var/tempo
+        - name: tempo-tmp
+          mountPath: /tmp
       volumes:
+      - name: tempo-data
+        emptyDir: {}
+      - name: tempo-tmp
+        emptyDir: {}
       - name: tempo-config-vol
         configMap:
           name: tempo-config
@@ -488,14 +530,29 @@ spec:
     spec:
       containers:
       - name: loki
-        image: grafana/loki:latest
+        image: grafana/loki:3.7.8
         securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          readOnlyRootFilesystem: true
+          seccompProfile:
+            type: RuntimeDefault
           allowPrivilegeEscalation: false
           capabilities:
             drop:
             - ALL
         ports:
         - containerPort: 3100
+        volumeMounts:
+        - name: loki-data
+          mountPath: /loki
+        - name: loki-tmp
+          mountPath: /tmp
+      volumes:
+      - name: loki-data
+        emptyDir: {}
+      - name: loki-tmp
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
