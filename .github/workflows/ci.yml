@@ -200,6 +200,13 @@ jobs:
       - name: Run CDC restart drill
         run: ./scripts/cdc-drill.sh
 
+      - name: Run load and reconciliation test
+        env:
+          LOAD_TOTAL: "400"
+          LOAD_CONCURRENCY: "20"
+          LOAD_P95_BUDGET_MS: "2000"
+        run: ./scripts/load-test.sh
+
       - name: Dump diagnostics on failure
         if: failure()
         run: |
